@@ -38,7 +38,7 @@ def test_white_page_encodes_to_value_one():
 def test_plane_channel_mapping_is_ymc_from_bgr():
     px = np.zeros((DOTS, LINES, 3), np.uint8)
     px[..., 0] = 255       # R full, G and B zero -> only plane 2 (cyan) is blank
-    prepared = prepare_colour(px, do_sharpen=False, rng=np.random.default_rng(0))
+    prepared = prepare_colour(px, rng=np.random.default_rng(0))
     y, m, c = colour_planes(prepared)
     assert (y == 31).all() and (m == 31).all() and (c == 1).all()
 
@@ -85,3 +85,14 @@ def test_stream_order_line_i_is_image_column_i():
     with pytest.raises(ValueError):
         stream_order(np.zeros((3, 3)))
 
+
+def test_sharpening_is_off_by_default_and_scales_with_the_amount():
+    from j1x0_cardprinter.encode import sharpen
+    edge = np.zeros((9, 9), np.uint8)
+    edge[:, 5:] = 20                                              # a vertical edge, small enough not to clamp
+    rng = np.random.default_rng(0)
+    plain = prepare_colour(np.dstack([edge] * 3), rng=rng)
+    assert len(np.unique(plain[..., 0][4])) <= 3                   # just the two flat levels, no halo
+    one, two = sharpen(edge, 1), sharpen(edge, 2)
+    assert one[4, 4] < edge[4, 4] + 1 and one[4, 5] > edge[4, 5]  # the bright side of the edge is boosted
+    assert abs(int(two[4, 5]) - int(edge[4, 5])) > abs(int(one[4, 5]) - int(edge[4, 5]))

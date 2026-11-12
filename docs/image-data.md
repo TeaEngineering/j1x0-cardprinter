@@ -34,7 +34,7 @@ The header field `32` after the plane number is the level count. **[infer]**
 1. If any intensity or contrast setting is non-zero: per-channel brightness add
    (`+= intensity*255/100`) then a power-law contrast curve. **[code]** The constants used in
    the `pow()` calls are assumed to be 255.0 (`DAT_180033a38`/`a40`, not checked).
-2. 3 x 3 sharpen on interior pixels. With `c` the centre sample, `N4` the sum of the four
+2. 3 x 3 sharpen on interior pixels. (This tool leaves it off by default; `render --sharpening 1` is this step, 2 to 5 scale it up. It leaves a thin halo at hard edges, e.g. between gradient steps.) With `c` the centre sample, `N4` the sum of the four
    edge neighbours and `D4` the sum of the four diagonal neighbours:
 
    ```

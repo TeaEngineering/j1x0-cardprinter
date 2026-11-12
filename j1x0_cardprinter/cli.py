@@ -90,6 +90,7 @@ def _render_job(args: argparse.Namespace) -> bytes:
     printer = Printer(
         rasteriser=_rasteriser(args, template),
         seed=args.seed,
+        sharpening=args.sharpening,
     )
     return printer.build(template, values)
 
@@ -251,6 +252,9 @@ def main(argv: list[str] | None = None) -> int:
         card_args(p)
         p.add_argument("--seed", type=int, default=None,
                        help="seed the dither so repeated renders are byte-identical")
+        p.add_argument("--sharpening", type=int, default=0, choices=range(0, 6), metavar="0-5",
+                       help="edge sharpening of the colour planes: 0 off (default), 1 what the Windows driver does, "
+                            "2 to 5 stronger. It puts a thin halo at hard edges, e.g. between gradient steps")
 
     def usb_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--vid", type=lambda s: int(s, 0), default=None,

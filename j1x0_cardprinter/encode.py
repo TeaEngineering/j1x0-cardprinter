@@ -26,14 +26,18 @@ def stream_order(image: np.ndarray) -> np.ndarray:
 
 # ── Colour preparation ───────────────────────────────────────────────────────
 
-def sharpen(channel: np.ndarray) -> np.ndarray:
-    """The driver's 3x3 sharpen (interior pixels only): v += clamp((12c - 2*N4 - D4)*5/16, +-70)."""
+def sharpen(channel: np.ndarray, amount: int = 1) -> np.ndarray:
+    """The driver's 3x3 sharpen (interior pixels only): v += clamp((12c - 2*N4 - D4)*5*amount/16, +-70).
+
+    `amount` 1 is what the Windows driver does; 2, 3, ... scale the correction up. Sharpening makes a thin
+    light/dark halo at every hard edge, which shows as a faint line between the steps of a gradient strip.
+    """
     c = channel.astype(np.int32)
     out = c.copy()
     centre = c[1:-1, 1:-1]
     n4 = c[:-2, 1:-1] + c[2:, 1:-1] + c[1:-1, :-2] + c[1:-1, 2:]
     d4 = c[:-2, :-2] + c[:-2, 2:] + c[2:, :-2] + c[2:, 2:]
-    t = (12 * centre - 2 * n4 - d4) * 5 + 8
+    t = (12 * centre - 2 * n4 - d4) * 5 * amount + 8
     t = (t + (t < 0) * 15) >> 4                     # divide by 16, rounding toward zero
     out[1:-1, 1:-1] = centre + np.clip(t, -70, 70)
     return out
@@ -47,17 +51,18 @@ def quantise16(channel: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def prepare_colour(
-    rgb: np.ndarray, *, do_sharpen: bool = True, rng: np.random.Generator | None = None
+    rgb: np.ndarray, *, sharpening: int = 0, rng: np.random.Generator | None = None
 ) -> np.ndarray:
     """(H, W, 3) uint8 RGB -> same shape, values in {0, 16, ... 240}.
 
-    Brightness/contrast adjustment is left to the artwork; the driver's gain/gamma stage
-    is not reproduced.
+    `sharpening` 0 (the default) leaves edges alone; 1 is the Windows driver's 3x3 sharpen (`sharpen`), and
+    larger values sharpen more. Brightness/contrast adjustment is left to the artwork; the driver's
+    gain/gamma stage is not reproduced.
     """
     rng = rng or np.random.default_rng()
     out = np.empty_like(rgb)
     for i in range(3):
-        channel = sharpen(rgb[..., i]) if do_sharpen else rgb[..., i]
+        channel = sharpen(rgb[..., i], sharpening) if sharpening > 0 else rgb[..., i]
         out[..., i] = quantise16(channel, rng)
     return out
 

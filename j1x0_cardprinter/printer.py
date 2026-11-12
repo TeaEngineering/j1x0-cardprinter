@@ -20,14 +20,16 @@ class Printer:
         link: J1x0Link | None = None,
         rasteriser: Rasteriser | None = None,
         seed: int | None = None,
+        sharpening: int = 0,
     ) -> None:
         self.link = link
         self.rasteriser = rasteriser or InkscapeRasteriser()
+        self.sharpening = sharpening
         self._rng = np.random.default_rng(seed)
 
     def encode(self, card: CardRaster, options: JobOptions | None = None) -> bytes:
         """Turn an already-rendered card into the complete job byte stream."""
-        prepared = prepare_colour(np.asarray(card.colour), rng=self._rng)
+        prepared = prepare_colour(np.asarray(card.colour), sharpening=self.sharpening, rng=self._rng)
         planes = [encode_plane(p) for p in colour_planes(prepared)]
         k_payload = pack_mono(card.k_mask) if card.k_mask is not None else None
         return build_job(planes, k_payload, options)
