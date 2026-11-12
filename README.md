@@ -46,30 +46,68 @@ Quick start
     layers: Design, K
 
     $ j1x0 preview examples/card.svg -s firstName=Ada -s lastName=Lovelace -s cardNo=0042 -o out/
-    $ j1x0 build   examples/card.svg -s firstName=Ada -s lastName=Lovelace -s cardNo=0042 -o job.bin
-    $ j1x0 print   examples/card.svg -s firstName=Ada -s lastName=Lovelace -s cardNo=0042 \
-                   --vid 0x1234 --pid 0x5678
+    $ j1x0 render  examples/card.svg -s firstName=Ada -s lastName=Lovelace -s cardNo=0042 -o job.bin
+    $ j1x0 send                                          # check the printer, then stop
+    $ j1x0 send    job.bin                               # check the printer, then send
+    $ j1x0 print   examples/card.svg -s firstName=Ada -s lastName=Lovelace -s cardNo=0042
 
-| Command | What it does |
-|---|---|
-| `fields` | List the `$token$` fields and layer names in a template. |
-| `preview` | Write `colour.png` and `k.png` so you can check the two renders. |
-| `build` | Write the complete printer job to a file. Needs no printer. |
-| `print` | Build the job and send it to the printer. |
+| Command | Needs | What it does |
+|---|---|---|
+| `fields` | | List the `$token$` fields and layer names in a template. |
+| `preview` | Inkscape | Write `colour.png` and `k.png` so you can check the two renders. |
+| `render` | Inkscape | Render a card to a printer job file. No printer needed. (`build` is an alias.) |
+| `send` | printer | Check the printer. With a job file, then send it; without one, stop there. No Inkscape needed. |
+| `print` | both | `render` then `send`, through a temporary job file. `-o job.bin` keeps the file. |
+
+`render` and `send` can run on different machines: render where your design tools and fonts
+are, send from the computer the printer is plugged into. Rendering is dithered randomly, so
+add `--seed N` if you want repeated renders to be byte-identical.
 
 Every field in the template needs a `-s NAME=VALUE`; the command stops and lists any that are
 missing.
 
-### Finding the USB IDs
+### Checking the printer
 
-The vendor ID and product ID are not known to this project yet, so `print` requires them.
-With the printer connected and powered on:
+`send` always opens the USB link and checks it before it sends anything, using the same reads
+the Windows driver makes when it starts a document:
 
-    $ system_profiler SPUSBDataType      # macOS
-    $ lsusb                              # Linux
+    $ j1x0 send
+    device:           bus 1 addr 7  04f9:0123  ...
+    1284 id:          MFG:...;MDL:...;
+    usb serial:       ...
+    port status:      0x18 (selected, no error)
+    model/firmware:   ...
+    serial number:    ...
+    head resistance:  ...
+    magnetic encoder: Yes
+    smart card:       HID iCLASS
+    ribbon type:      2 (YMCKO)
+    remaining count:  87
+    panels printed:   1234
+    result:           READY
 
-Look for the card printer and pass its IDs as `--vid` and `--pid` (hex, e.g. `0x1234`).
-If you find them, please open an issue or pull request so they can become defaults.
+From `model/firmware` down, the fields are the ones on the Windows driver's "Device Information"
+page. A field the printer does not answer shows as `N/A` and does not stop a job. The `smart card`
+line is worked out from the model/firmware reply (for example HID iCLASS or MIFARE contactless),
+which makes it a quick way to see whether a unit has an RFID encoder.
+
+With no job file that is all it does, and it exits 0 if the printer is ready and 1 if not, so
+it works as a health check in scripts. With a job file it refuses to send to a printer that is
+not ready (offline, error, no ribbon, no reply); `--force` overrides that and `--no-check`
+skips the checks. Nothing is printed and no job is started by the check.
+
+The output above is illustrative: none of this has run against a printer yet.
+
+### Finding the printer
+
+By default the printer is found automatically: every USB printer-class device is listed and the
+one whose IEEE-1284 id looks like a J1x0 is used. If that finds nothing, or several, `send`
+prints what it saw and you can pick one with the IDs from `system_profiler SPUSBDataType`
+(macOS) or `lsusb` (Linux):
+
+    $ j1x0 send --vid 0x1234 --pid 0x5678
+
+If you find the IDs, please open an issue or pull request so they can become defaults.
 
 First test print
 ----------------
@@ -77,7 +115,9 @@ First test print
 Start with [`examples/test-card.svg`](examples/test-card.svg). It has no fields:
 
     $ j1x0 preview examples/test-card.svg -o out/        # check out/colour.png and out/k.png
-    $ j1x0 print   examples/test-card.svg --vid ... --pid ...
+    $ j1x0 render  examples/test-card.svg -o test.bin
+    $ j1x0 send                                          # first, just check the link
+    $ j1x0 send    test.bin
 
 It is designed to answer the open questions about a new printer:
 
@@ -114,6 +154,7 @@ Python API
 
 ```python
 from j1x0_cardprinter import J1x0USB, Printer, Template
+from j1x0_cardprinter.probe import check_link
 
 template = Template.from_file("examples/card.svg")
 values = {"firstName": "Ada", "lastName": "Lovelace", "cardNo": "0042"}
@@ -121,18 +162,21 @@ values = {"firstName": "Ada", "lastName": "Lovelace", "cardNo": "0042"}
 printer = Printer()
 job = printer.build(template, values)          # bytes; no hardware needed
 
-with J1x0USB.discover(vid=0x1234, pid=0x5678) as link:
-    printer.link = link
-    printer.print_card(template, values)
+with J1x0USB.discover() as link:               # or discover(vid=..., pid=...)
+    report = check_link(link)                  # USB status, model, ribbon
+    print("\n".join(report.lines()))
+    if report.ready:
+        link.write(job)
 ```
 
-`J1x0MockUSB` records writes instead of sending them, which is handy for tests.
+`J1x0MockUSB` records writes (`.sent`) and queries (`.queries`) instead of using USB, and lets
+you set the status byte and replies, which is handy for tests.
 
 Orientation
 -----------
 
 How the image is mirrored or rotated in the data stream has not been confirmed against a
-printer. If your first test card comes out rotated or mirrored, try the flags on `build` and
+printer. If your first test card comes out rotated or mirrored, try the flags on `render` and
 `print` (`Orientation` in the Python API):
 
     $ j1x0 print card.svg ... --flip-lines --flip-dots     # a 180 degree turn

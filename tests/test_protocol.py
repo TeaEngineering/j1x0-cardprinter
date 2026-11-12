@@ -36,4 +36,5 @@ def test_mock_link_records_writes():
     link = J1x0MockUSB(responses={b"q": b"reply"})
     assert link.write(b"abc") == 3
     assert link.query(b"q") == b"reply"
-    assert link.stream == b"abcq"
+    assert link.stream == b"abc"            # queries are recorded separately from job bytes
+    assert link.queries == [b"q"]

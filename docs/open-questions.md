@@ -45,13 +45,34 @@ internal enum. Needed to pick the right job template for non-YMCKO ribbons.
 
 ## Transport and encoding
 
-**Q10. VID/PID, endpoints, and whether the printer sends data back over bulk-IN.**
-Plug it in and run `system_profiler SPUSBDataType`.
+**Q10. Does the link check work?** Run `j1x0 send` with the printer connected and idle. It is
+the cheapest first experiment, and each part of it is a separate question:
 
-**Q11. Status reply format.** `!RIBBON` is terminated by `0x06`. The status/error code format
-and the mapping to the error strings are not decoded.
+- *The 1284 id.* Does `GET_DEVICE_ID` answer, and does it match `javel|j1[012]0`? If not,
+  autodetect finds nothing and `--vid`/`--pid` are needed (the output lists what was seen). The
+  id string and VID/PID should then be recorded in `status-and-transport.md`.
+- *GET_PORT_STATUS.* Is `0x18` what an idle printer returns? (The monitor's rule is bit 5 set, or
+  `status & 0x38 == 0x18`.)
+- *Bulk-IN replies.* Does a query come back at all? If `V` times out, try without the `ESC E 2 CR`
+  suffix (`QUERY_SUFFIX` in `usb.py`) and with `ESC E 1 CR`.
+- *Reply shape.* Does `V` return text ending in `0x06`, as the monitor expects? Capture the raw
+  bytes and compare with `parse_reply`.
+- *`wIndex`.* The class requests use `interface<<8 | alt` for GET_DEVICE_ID and the interface
+  number for GET_PORT_STATUS; the other form is tried as a fallback for GET_DEVICE_ID only.
 
-**Q12. RFID / smart-card encoder.** Which library or command set controls it, and whether it is
+**Q11. What do `ESC E 2`, `ESC A n`, `ISREADY` and `CHECK_STATUS` mean on the wire?**
+`ESC E n` follows every query on the Windows side. `ISREADY` and `CHECK_STATUS` are handled by
+the monitor (section 5 of `status-and-transport.md`); only the port-status part is understood.
+
+**Q12. Is `ESC MASTER CR` needed once or twice?** The monitor writes it when it opens the port
+and the raster driver's job header begins with it as well. `render` emits one copy (the driver's);
+`send` adds none.
+
+**Q13. Does `SOFT_RESET` matter?** rollingmill sends it for the MDX. `j1x0 send` does not unless
+`--soft-reset` is given, because it can abort a job in progress. The Windows monitor was not seen
+issuing one.
+
+**Q14. RFID / smart-card encoder.** Which library or command set controls it, and whether it is
 inside the printer or a separate reader. `EILMON.dll` and `EInt.dll` are not in the package.
 
 ## Cross-checks to do when hardware is available
