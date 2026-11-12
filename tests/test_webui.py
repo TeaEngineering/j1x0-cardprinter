@@ -68,7 +68,9 @@ VALUES = {"firstName": "Ada", "cardNo": "0042"}
 # ── Designs and fields ───────────────────────────────────────────────────────
 
 def test_designs_are_listed_with_readable_titles(app, designs):
-    assert app.designs() == {"dir": str(designs), "designs": [{"name": "staff_badge", "title": "Staff badge"}]}
+    listing = app.designs()
+    assert listing["dir"] == str(designs)
+    assert listing["designs"] == [{"name": "staff_badge", "title": "Staff badge"}]
 
 
 def test_design_info_gives_labelled_fields_with_pictures_last(app):
@@ -505,3 +507,46 @@ def test_the_print_endpoint_ignores_any_attempt_to_override_a_not_ready_printer(
         httpd.shutdown()
         httpd.server_close()
         card_app.close()
+
+
+def test_status_checks_never_share_the_link(designs):
+    """Replies are matched to queries by order, so two users of the link would swap answers."""
+    import time
+    inside, overlaps = [0], []
+
+    class Slow(J1x0MockUSB):
+        def query(self, *args, **kwargs):
+            inside[0] += 1
+            overlaps.append(inside[0])
+            time.sleep(0.02)
+            try:
+                return super().query(*args, **kwargs)
+            finally:
+                inside[0] -= 1
+
+    shared = CardApp(designs, rasteriser=FakeRasteriser(), link_factory=lambda: Slow())
+    try:
+        threads = [threading.Thread(target=shared.status, kwargs={"full": i % 2 == 0}) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        shared.close()
+    assert overlaps and max(overlaps) == 1
+
+
+def test_status_does_not_wait_for_a_print(designs):
+    busy = CardApp(designs, rasteriser=FakeRasteriser(), link_factory=lambda: J1x0MockUSB())
+    try:
+        busy._usb.acquire()
+        busy._busy = True
+        assert busy.status()["state"] == "printing"
+    finally:
+        busy._usb.release()
+        busy.close()
+
+
+def test_the_page_is_told_which_renderer_draws_the_cards(app):
+    assert app.designs()["renderer"] == "FakeRasteriser"
+    assert CardApp(app.designs_dir, rasteriser=CairoRasteriser()).renderer_name() == "built-in renderer (cairosvg)"

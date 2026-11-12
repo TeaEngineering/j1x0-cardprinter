@@ -39,6 +39,7 @@ async function loadDesigns() {
   const box = $("designs");
   box.replaceChildren();
   $("designs-dir").textContent = data.dir;
+  $("renderer").textContent = data.renderer;
   $("no-designs").hidden = data.designs.length > 0;
   for (const design of data.designs) {
     const button = document.createElement("button");
@@ -110,6 +111,17 @@ function buildForm(info) {
     if (field.kind === "image") {
       input.type = "file";
       input.accept = "image/*";
+      const camera = document.createElement("input");     // on a phone or tablet this opens the camera
+      camera.type = "file";
+      camera.accept = "image/*";
+      camera.capture = "environment";
+      camera.hidden = true;
+      const take = document.createElement("button");
+      take.type = "button";
+      take.className = "take-photo";
+      take.textContent = "Take photo";
+      take.addEventListener("click", () => takePhoto(camera, take, field.name, thumb));
+      wrap.append(camera, take);
       const thumb = document.createElement("img");
       thumb.className = "thumb";
       thumb.hidden = true;
@@ -130,6 +142,52 @@ function changed(name, value) {
   state.stale = true;
   updateUI();
   scheduleRender();
+}
+
+// Use the camera in the page where the browser offers one (a laptop webcam); otherwise the capture
+// input above hands over to the device's camera app.
+async function takePhoto(fallback, button, fieldName, thumb) {
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) || /Android|iPhone|iPad/.test(navigator.userAgent)) {
+    fallback.onchange = () => uploadPhoto(fieldName, fallback.files[0], thumb);
+    fallback.click();
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  } catch (error) {
+    fallback.onchange = () => uploadPhoto(fieldName, fallback.files[0], thumb);
+    fallback.click();
+    return;
+  }
+  const video = document.createElement("video");
+  video.className = "camera";
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  const snap = document.createElement("button");
+  snap.type = "button";
+  snap.textContent = "Capture";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const bar = document.createElement("div");
+  bar.className = "camera-bar";
+  bar.append(video, snap, cancel);
+  button.after(bar);
+  button.disabled = true;
+  const stop = () => { stream.getTracks().forEach((t) => t.stop()); bar.remove(); button.disabled = false; };
+  cancel.addEventListener("click", stop);
+  snap.addEventListener("click", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    stop();
+    canvas.toBlob((blob) => { if (blob) uploadPhoto(fieldName, new File([blob], "photo.jpg", { type: "image/jpeg" }), thumb); },
+                  "image/jpeg", 0.92);
+  });
 }
 
 async function uploadPhoto(fieldName, file, thumb) {

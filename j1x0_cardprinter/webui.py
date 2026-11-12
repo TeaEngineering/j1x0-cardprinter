@@ -39,7 +39,7 @@ from PIL import Image, ImageOps
 from .library import Design, discover, humanise
 from .printer import Printer
 from .probe import check_link, quick_check
-from .raster import CairoRasteriser, InkscapeShellRasteriser, Rasteriser, composite, render_card
+from .raster import CairoRasteriser, InkscapeRasteriser, InkscapeShellRasteriser, Rasteriser, composite, render_card
 from .sender import send_job
 from .template import MissingField, Template
 from .usb import DeviceSelectionError, J1x0USB
@@ -106,6 +106,7 @@ class CardApp:
         self._blank = self._tmp / "blank.png"
         Image.new("RGBA", (1, 1), (255, 255, 255, 0)).save(self._blank)
         self._lock = threading.Lock()
+        self._usb = threading.Lock()                    # one conversation with the printer at a time
         self._renders: OrderedDict[str, Rendered] = OrderedDict()
         self._thumbs: dict[str, tuple[float, bytes]] = {}
         self._busy = False
@@ -120,9 +121,16 @@ class CardApp:
 
     # ── Designs ──────────────────────────────────────────────────────────────
 
+    def renderer_name(self) -> str:
+        if isinstance(self.rasteriser, CairoRasteriser):
+            return "built-in renderer (cairosvg)"
+        if isinstance(self.rasteriser, (InkscapeRasteriser, InkscapeShellRasteriser)):
+            return "Inkscape"
+        return type(self.rasteriser).__name__
+
     def designs(self) -> dict:
         found = discover(self.designs_dir)
-        return {"dir": str(self.designs_dir),
+        return {"dir": str(self.designs_dir), "renderer": self.renderer_name(),
                 "designs": [{"name": d.name, "title": d.title} for d in found]}
 
     def _design(self, name: str) -> Design:
@@ -257,8 +265,14 @@ class CardApp:
     def status(self, full: bool = False) -> dict:
         """Printer state for the status chip. Quick = the USB status byte, or one version query for
         a printer that has no status byte; full = the whole link check (slower)."""
+        printing = {"state": "printing", "ready": False, "message": "Sending a card to the printer…"}
         if self._busy:
-            return {"state": "printing", "ready": False, "message": "Sending a card to the printer…"}
+            return printing
+        # Replies are matched to queries by order, so two users of the link would swap each other's
+        # answers. A print takes the link for a long time: do not queue behind it.
+        if not self._usb.acquire(timeout=5):
+            return printing if self._busy else {"state": "unknown", "ready": False,
+                                                "message": "The printer is busy. Checking again shortly…"}
         try:
             with self._link_factory() as link:
                 if full:
@@ -280,6 +294,8 @@ class CardApp:
             return {"state": "error", "ready": False, "message": f"Could not talk to the printer: {text}"}
         except Exception as exc:                         # usb.core.USBError and friends
             return {"state": "error", "ready": False, "message": f"Could not talk to the printer: {exc}"}
+        finally:
+            self._usb.release()
 
     def start_print(self, render_id: str) -> dict:
         """Send the job behind a preview, in the background. One job at a time."""
@@ -300,7 +316,7 @@ class CardApp:
 
     def _run_print(self, job: dict, rendered: Rendered) -> None:
         try:
-            with self._link_factory() as link:
+            with self._usb, self._link_factory() as link:
                 report = check_link(link, details=False)
                 if not report.ready:
                     self._finish(job, "error", _attention(report.problems))

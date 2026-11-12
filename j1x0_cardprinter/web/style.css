@@ -125,3 +125,8 @@ pre {
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem;
   font-size: 0.85rem; overflow-x: auto; white-space: pre-wrap;
 }
+
+.foot { margin: 24px 16px; color: #667; font-size: 0.85rem; }
+.take-photo { margin-left: 8px; }
+.camera-bar { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.camera { max-width: 100%; width: 320px; border-radius: 6px; background: #000; }
