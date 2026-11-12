@@ -19,7 +19,8 @@ Size is 640 x 1024 when `pdev+0x84 == 1` (portrait), otherwise 1024 x 640.
 
 Plane p reads byte `p` of every pixel: plane 0 = B, 1 = G, 2 = R. Inverting those gives
 yellow, magenta and cyan density, so planes 0, 1, 2 = **Y, M, C**. **[code]** for the byte
-offsets, **[infer]** for the colour names.
+offsets. The colour names are confirmed: the captured planes decode to a natural-looking card with
+plane 0 as the blue channel, and a card printed from planes built this way has the right colours.
 
 Per sample:
 
@@ -27,13 +28,15 @@ Per sample:
 v = (255 - byte) >> 3          # 0..31, higher = more dye
 ```
 
-The header field `32` after the plane number is the level count. **[infer]**
+The header field `32` after the plane number is probably the level count. **[infer]** It is sent as is
+and the printer accepts it; the values on the wire are odd numbers 1 to 31 (`open-questions.md` Q2, Q6).
 
 ### Pre-processing (`PrepareColourSurface`, applied in place, always)
 
 1. If any intensity or contrast setting is non-zero: per-channel brightness add
    (`+= intensity*255/100`) then a power-law contrast curve. **[code]** The constants used in
-   the `pow()` calls are assumed to be 255.0 (`DAT_180033a38`/`a40`, not checked).
+   the `pow()` calls are 255.5 (`DAT_180033a38`) and 255.0 (`DAT_180033a40`), read from the binary.
+   This tool does not reproduce this stage; brightness and contrast are left to the artwork.
 2. 3 x 3 sharpen on interior pixels. (This tool leaves it off by default; `render --sharpening 1` is this step, 2 to 5 scale it up. It leaves a thin halo at hard edges, e.g. between gradient steps.) With `c` the centre sample, `N4` the sum of the four
    edge neighbours and `D4` the sum of the four diagonal neighbours:
 
@@ -81,10 +84,15 @@ forward is "start at the first pixel, step +3 bytes along the row, step +stride 
 the rotation flag (`pdev+0x112`) is 0 the driver instead starts at the *last* pixel of the
 last row and walks backwards (a 180 degree turn). The landscape encoders (`FUN_1800153a0`,
 `FUN_180015100`) are the transposed equivalents and have not been decompiled. **[code]**/**[infer]**
+Only the portrait path was captured, and it is what this tool emits. The resulting stream order is
+settled by the capture and by a printed card (`captured-job.md`, Orientation); the landscape encoders
+are not needed.
 
 ## 3. Grey K plane (plane 3)
 
-Same pre-processing as the colour planes, but each sample is the inverted luma (its payload format has not been captured):
+Same pre-processing as the colour planes, but each sample is the inverted luma. **Not captured and not
+used by any ribbon tried so far** (a YMCKO ribbon takes the resin bitmap instead), so this section is
+disassembly only:
 
 ```
 v = ( (255-G)*59 + (255-R)*30 + (255-B)*11 ) // 100  >> 3
@@ -96,7 +104,9 @@ versions are `FUN_180014db0` and `FUN_180014ac0`.) Header
 
 ## 4. K resin bitmap
 
-Used for the black resin panel when the K surface has any non-white byte. **[code]**
+Used for the black resin panel when the K surface has any non-white byte. **[code]** Header, framing and
+bit meaning are confirmed by prints made by this tool (text, markers and line blocks come out right);
+the byte stuffing and the line order need the qualifications below.
 
 ```
 ESC F CR ESC G 0 0 10 640 1024 1 CR ESC Z      header (a fixed string, with 10 filled in)
@@ -107,12 +117,15 @@ CR
 - Each line is 640 dots packed into 80 bytes, **MSB first**.
 - Every byte is **inverted** before output, so a set bit means "put a dot here" (the DIB uses
   0 for black, 1 for white).
-- Any output byte equal to `0x5B` (`[`) is **written twice** (byte stuffing).
+- Any output byte equal to `0x5B` (`[`) is **written twice** (byte stuffing). **[code]** only: no
+  bitmap sent so far contained that byte, so it is unconfirmed on the wire (`open-questions.md` Q17).
 - The loop reads the 1 bpp surface as 128 byte columns x 8 bit positions = 1024 lines. With the
   flip flag set it walks the other way (180 degree rotation).
+- **The lines go out in the reverse order to the colour planes** (measured from a printed card; the
+  capture's K bitmap was all zeros). See `captured-job.md`.
 
 What `10` means in the header is unknown. **[guess]** a heat/energy value, as it is a literal in
-the code.
+the code. It is sent as is and the printer accepts it.
 
 Before packing the driver may run a monochrome conversion (`FUN_180004230`: diffusion, halftone
 or barcode, per the Printing Preferences help page) and a rotation (`FUN_180005e50`). For our tool

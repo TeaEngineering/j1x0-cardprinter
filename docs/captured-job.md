@@ -73,6 +73,25 @@ while the dots across the short edge were right. `encode.pack_mono` therefore se
 reverse order. (The Windows driver packs the K bitmap with its own walking logic, `FUN_180015cc0`, which
 was not decompiled; this is the measured result.)
 
+## What the printer answers
+
+Replies on the test unit (J110i V1.18.25, YMCKO ribbon, no encoder), recorded in the same capture:
+
+| Query | Reply |
+|---|---|
+| `ESC V` | `J110i V1.18.25` + ACK |
+| `ESC !RIBBON`, `!RIBLEN` | `2 `, `131 ` + ACK (the remaining count falls by one per card) |
+| `ESC !V 15`, `!V 20` | `2890 ` (head resistance), `0` (no magnetic encoder) |
+| `ESC %SERIE`, `ESC !NL` | the serial; `00012999 00000028` (panels printed, and an unidentified `28`) |
+| `ESC !V 1`, `!V 2`, `!V 25`, `!V 24` | `2 `, `20 `, `20 `, `18 ` (meaning unknown) |
+| `ESC SLAVE` | an ACK alone |
+| each `ESC E 2` during the job | a single ACK. The capture also shows a separate 3-byte transfer of zeros after each one; its meaning is unknown, and our own logs on the Mac show only the one ACK byte |
+
+The only class requests the Windows stack sent were `GET_DEVICE_ID` (`A1 00`, wValue 0, wIndex 0, a
+1009-byte buffer; answered with 48 bytes, `MFG:JAVELIN CARD PRINTER;CMD:none;MDL:J110i  ;`) and
+`GET_PORT_STATUS` (`A1 01`, wValue 0, wIndex 0, 1 byte; 16 requests, all `0x18`). It sent no
+`SOFT_RESET`. The other control transfers (57 plain control URBs) were not decoded.
+
 ## Not what the disassembly said
 
 * **No run-length coding** (see above).
@@ -82,3 +101,12 @@ was not decompiled; this is the measured result.)
 * **The end of the card is `ESC MO CR` alone**, with no leading `CR` and no `ESC !FF 0 CR`, on a
   YMCKO ribbon. (`EndDocPort` as read in Ghidra had both for panel ribbons.)
 * **`ESC E 2` is asked in a few places only**, not after every 4096-byte chunk (section above).
+* **`GET_PORT_STATUS` and `GET_DEVICE_ID` are answered** by the printer, contrary to the first session
+  with it (`open-questions.md` Q15).
+
+## What this capture cannot show
+
+* The resin bitmap's real packing: its K plane was all zeros, so the line order and the `0x5B` stuffing
+  come from the disassembly and a printed card, not from the wire.
+* Tuning values other than the default 5.
+* Anything but a single-sided YMCKO job on one ribbon.

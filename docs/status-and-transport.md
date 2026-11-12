@@ -16,6 +16,15 @@ one interface: class 7 (printer), subclass 1, protocol 2 (bidirectional), with b
 bulk-OUT `0x02`, both 64 bytes. The vendor id `0a5f` is Zebra's; the printer's own strings say
 `JAVELIN` (manufacturer) and `J110i` (product).
 
+> **Correction.** The rows below that say `GET_DEVICE_ID` and `GET_PORT_STATUS` time out describe the
+> first session on a freshly powered printer. A later USB capture of the Windows driver shows the
+> printer **answering both**: `GET_PORT_STATUS` returned `0x18` (all 16 requests) and `GET_DEVICE_ID`
+> returned 48 bytes, `MFG:JAVELIN CARD PRINTER;CMD:none;MDL:J110i  ;`. They are the same requests
+> as ours (`A1 01 0000 0000`, 1 byte; `A1 00 0000 0000`, buffer up to 1009 bytes), and the same two
+> requests answered instantly from the Mac once the printer had been used from Windows. Why they
+> timed out the first time is unknown (`open-questions.md` Q15), so the code still does not rely on
+> them.
+
 **What answers and what does not.**
 
 | Request | Result |
@@ -23,8 +32,8 @@ bulk-OUT `0x02`, both 64 bytes. The vendor id `0a5f` is Zebra's; the printer's o
 | Standard requests (device descriptor, GET_STATUS, configuration) | answered |
 | String descriptor, asked with an explicit language id `0x0409` | answered, **except index 3** (the USB serial number), which times out |
 | String descriptor 0 (the language list) | **times out**, so pyusb's `get_string` fails; ask for `0x0409` directly |
-| Printer-class `GET_DEVICE_ID` (every form tried: lengths 2 to 1024, `wIndex` `0`, `0x0100`, interface claimed or not) | **times out**: this model has no 1284 id |
-| Printer-class `GET_PORT_STATUS` | **times out**: no status byte |
+| Printer-class `GET_DEVICE_ID` (every form tried: lengths 2 to 1024, `wIndex` `0`, `0x0100`, interface claimed or not) | **timed out** on first contact; answered later (see the correction above) |
+| Printer-class `GET_PORT_STATUS` | **timed out** on first contact; answered `0x18` later |
 | Bulk-OUT writes, bulk-IN reads | work |
 
 **The query channel is confirmed.** Writing `ESC V CR` and then `ESC E 2 CR` (two separate bulk
@@ -46,8 +55,9 @@ section 4 says.
 
 **Consequences for the code.** The printer is identified by its strings and its vid/pid
 (`KNOWN_PRINTERS` in `usb.py`), not by a 1284 id. The status byte is not used for readiness on this
-model (`NO_STATUS_REQUEST`); a version query answers instead (`probe.quick_check`). A missing status
-byte is a warning, not a failure. Everything is reached in about 0.1 s.
+model (`NO_STATUS_REQUEST`, cautious because of the first-contact timeouts); a version query answers
+instead (`probe.quick_check`). A missing status byte is a warning, not a failure. Everything is reached
+in about 0.1 s. Once Q15 is settled the code can ask for the status byte, as Windows does.
 
 ## 1. USB identity
 
@@ -78,14 +88,16 @@ may behave differently: they are matched by their strings, and a model that does
    `ISERIES` also skip it.
 6. The monitor itself writes **`ESC MASTER CR`**, then sets the session flag.
 
-There is **no periodic heartbeat** in the paths analysed. The status byte and the queries above
-are one-shot checks at open. **[infer]** (not every function in the monitor has been read)
+There is no periodic heartbeat in the monitor paths analysed: the status byte and the queries above are
+one-shot checks at open. **[infer]** (not every function in the monitor has been read.) The USB capture
+does show the Windows status UI polling `ESC V CR` + `ESC E 2 CR` about once a second while idle, so a
+heartbeat exists at the application level, from `jvlAsyncUIServer`/`jvlUI` rather than the monitor.
 
 `j1x0 send` with no job file runs steps 3 to 5 (without the `MASTER` write) and stops.
 
 Note step 6: the raster driver's job header also begins with `ESC MASTER CR`
-(`SendJobHeader`), so a Windows job probably carries `MASTER` twice. Whether the printer needs
-it once or twice is open (`open-questions.md`).
+(`SendJobHeader`), so a Windows job carries `MASTER` twice. **[capture]** Confirmed: two in a row. Our
+job header sends both.
 
 ## 3. Port status byte
 
@@ -105,7 +117,8 @@ Bits, as for an LPT status register:
 
 The monitor lets the port open only if the request succeeded **and** (`status & 0x20` or
 `(status & 0x38) == 0x18`). **[code]** An idle, healthy printer is therefore expected to read
-`0x18`. `PortStatus.ok_to_open` implements exactly this test.
+`0x18`, and the capture confirms it: all 16 replies in the capture were `0x18`. `PortStatus.ok_to_open`
+implements exactly this test.
 
 ## 4. Query framing
 
@@ -122,8 +135,9 @@ printer -> host   <text> [space] ACK(0x06)                    success
   seconds). Callers then require the **last byte to be `0x06`** and strip a trailing space.
 - An error reply starts with `0x15`; the error id is `(b[1] & 15) * 10 + (b[2] & 15)` and is
   looked up in the table below (`LookupErrorMessage`).
-- What `ESC E 2` does is not known. **[guess]** "enable response", i.e. it asks the printer to
-  send the reply. The client code sends it after every query, so ours does too.
+- What `ESC E 2` does internally is not known, but its behaviour is: the printer answers a query only
+  after it, and during a job it is the "ready for more?" handshake (one ACK as the reply).
+  **[hw]** **[capture]** (The guess was "enable response".) Our code sends it after every query.
 
 ### Queries seen
 
@@ -133,7 +147,9 @@ printer -> host   <text> [space] ACK(0x06)                    success
 | `ESC !RIBBON CR` | ribbon id, decimal | `QueryRibbonAndModel`; ids in `jvRIBBON.INI` |
 | `ESC !RIBLEN CR` | remaining count, decimal | `CheckRibbonRemaining` |
 | `ESC R CR`, `ESC RESET CR` | forwarded, then the monitor sleeps **10 s** and fakes an ACK | `ExecPortCommand` |
-| `ESC A CR`, `ESC A 1..3 CR` | unknown (marks the command as encoder-related) | `ExecPortCommand` |
+| `ESC A CR`, `ESC A 1..3 CR` | unknown (marks the command as encoder-related); never seen on the wire | `ExecPortCommand` |
+| `ESC SLAVE CR` | the printer answers an ACK alone; sent once by the Windows UI at start-up, not in a job | **[capture]** |
+| `ESC !V 1`, `!V 2`, `!V 24`, `!V 25` | `2 `, `20 `, `18 `, `20 ` on the test unit; meaning unknown | **[capture]** |
 | `ESC MS 2`, `ESC MO CR` | clear the session flag | `ExecPortCommand` |
 
 ### Error ids (the monitor's table at `0x18001d320`) **[code]**
@@ -211,7 +227,8 @@ resources. **[code]**
 | Panels Printed | `ESC !NL CR` | leading `!` skipped, text up to the first space, as an integer |
 
 The UI also issues `ESC !V 1`, `ESC !V 2`, `ESC !V 24` and `ESC !V 25`; those are not part of
-this dialog and are not yet identified.
+this dialog and are still not identified. The capture recorded their replies on the test unit
+(`2 `, `20 `, `18 `, `20 `) but not what they mean (`open-questions.md` Q11).
 
 ## 8. Sending a job: acknowledgements and the end of the card
 
@@ -264,10 +281,10 @@ acknowledgement and every USB transfer. `--raw` writes the file as it is, for ex
 The link check asks for `V`, `!RIBBON` and `!RIBLEN` (these decide READY), then for the remaining
 Device Information fields of section 7 (`%SERIE`, `!V 15`, `!V 20`, `!NL`) and decodes the
 smart-card type from the `V` reply. Those four are informational: no answer shows as N/A. The
-reply formats of `%SERIE`, `!V 15` and `!NL` are assumed to be plain text ending in ACK; the
-Windows dialog suggests `!NL` contains a space (it searches for one) but the exact layout is
-unknown.
+reply formats of `%SERIE`, `!V 15` and `!NL` are plain text ending in ACK **[hw]**; `!NL` is
+`<panels printed> <second number>` (for example `00013012 00000028`), and the second number has never
+changed.
 
-Everything in these modules that touches the wire, the `ESC E 2` suffix, reading replies from
-bulk-IN, the 1284 id match and the exact class-request arguments, is **unverified** until it has
-run against a printer.
+The `ESC E 2` suffix, reading replies from bulk-IN, and the strings-and-vid/pid match are verified on a
+J110i **[hw]**. Not yet verified: the 1284 id match and `GET_PORT_STATUS` from a cold start
+(`open-questions.md` Q15), and any other model.

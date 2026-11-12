@@ -45,11 +45,14 @@ Windows app --GDI--> jvlRaster.DLL  --WritePrinter--> spooler --> jvlLMON.DLL --
 - Image area is **1024 x 640** (the header fields are `0 0 1024 640`, the overlay frame is
   `vL 0 0 1023 639`). **[code]**
 - This fits a CR80 card (85.6 x 54 mm) at roughly 300 dpi: 1011 x 638 px, padded a few pixels. **[infer]**
+  A test card drawn at 85.6 x 54 mm and rendered to 1024 x 640 printed matching its Inkscape preview, so
+  the scale is about 12 dots per mm.
 - The print head spans the short edge. The data stream is **1024 head lines of 640 dots**; a
   line is one slice across the card's short edge. **[infer]** (the encoder loops are 0x400 outer
   x 0x280 inner)
-- The driver's GDI surfaces are 640 x 1024 (portrait) or 1024 x 640 (landscape). Which way the
-  card is mirrored or rotated in the stream is **not yet established**. See `open-questions.md` Q3.
+- The driver's GDI surfaces are 640 x 1024 (portrait) or 1024 x 640 (landscape). The stream order is
+  settled: colour plane line *i* is image column *i*, and the resin bitmap's lines go the other way
+  (`captured-job.md`, `open-questions.md` Q3).
 
 ## 3. Panels
 
@@ -126,7 +129,10 @@ on the unit; the help file lists "Smart Card" as an optional device.
    **1024 x 640 1-bit** K mask and overlay mask.
 2. Colour handling can be our own. The driver's gain/gamma/sharpen/dither is only a quality
    choice; the printer receives 5-bit densities, so the 16 distinct levels the driver produces
-   are a floor, not a hardware limit. **[guess]** (the printer accepts 0..31)
-3. The transport is a plain write of the byte stream, preceded by the USB printer-class steps
-   used in the rollingmill code (GET_DEVICE_ID, SOFT_RESET).
+   are a floor, not a hardware limit. **[guess]** (the printer accepts 0..31; untested,
+   `open-questions.md` Q6.) This tool sends the driver's 16 levels with sharpening off.
+3. The transport is bulk-OUT writes of 4096 bytes with the monitor's pauses and `ESC E 2` handshake
+   (`status-and-transport.md` section 8). The Windows monitor sends no `SOFT_RESET`, and neither does
+   this tool unless asked (`--soft-reset`); its only class requests are `GET_DEVICE_ID` and
+   `GET_PORT_STATUS`.
 4. Status polling needs the language-monitor commands in `status-and-transport.md`.
