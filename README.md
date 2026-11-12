@@ -10,7 +10,8 @@ Design a card in Inkscape, put `$tokens$` in it, and print it on a J1x0-series
 > from the web UI.** The print protocol was reverse engineered from the vendor's Windows driver and
 > checked against a USB capture of that driver printing ([docs/captured-job.md](docs/captured-job.md)):
 > the job this tool builds is byte-for-byte what Windows sent. A printed test card matches its Inkscape
-> preview. Not yet tried: other models in the family, other ribbons, duplex, the magnetic stripe and
+> preview, and a real card with a photo has been printed from the web UI. Confirmed on a **J110i** only.
+> Not yet tried: other models in the family, other ribbons, duplex, the magnetic stripe and
 > smart-card encoders (see [docs/open-questions.md](docs/open-questions.md)).
 
 How it works
