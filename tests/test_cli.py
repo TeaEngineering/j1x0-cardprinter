@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import numpy as np
 import pytest
 from PIL import Image
 
@@ -18,8 +17,8 @@ class FakeRasteriser:
     """Stands in for Inkscape: a horizontal gradient, so the dither has something to randomise."""
 
     def render(self, svg, width, height):
-        row = np.linspace(0, 255, width).astype(np.uint8)
-        return Image.fromarray(np.tile(row, (height, 1))).convert("RGB")
+        row = bytes(round(i * 255 / (width - 1)) for i in range(width))
+        return Image.frombytes("L", (width, height), row * height).convert("RGB")
 
 
 @pytest.fixture
@@ -42,12 +41,13 @@ def test_render_writes_a_job_file(fakes, tmp_path, capsys):
 def test_preview_writes_colour_k_and_composite_by_default(fakes, tmp_path):
     assert cli.main(["preview", TEST_CARD, "-o", str(tmp_path)]) == 0
     assert sorted(p.name for p in tmp_path.glob("*.png")) == ["colour.png", "composite.png", "k.png"]
-    colour, k, both = (np.asarray(Image.open(tmp_path / n).convert("RGB")) for n in
-                       ("colour.png", "k.png", "composite.png"))
-    assert colour.shape == k.shape == both.shape == (640, 1024, 3)
-    black = (k == 0).all(axis=2)                       # the resin dots
-    assert black.any() and (both[black] == 0).all()    # the composite has them in black
-    assert (both[~black] == colour[~black]).all()      # and is the colour render everywhere else
+    colour, k, both = (Image.open(tmp_path / n).convert("RGB") for n in ("colour.png", "k.png", "composite.png"))
+    assert colour.size == k.size == both.size == (1024, 640)
+    triples = lambda image: list(zip(*[iter(image.tobytes())] * 3))             # (r, g, b) per pixel
+    pixels = list(zip(triples(colour), triples(k), triples(both)))
+    resin = [(c, b) for c, k_, b in pixels if k_ == (0, 0, 0)]                 # the resin dots
+    assert resin and all(b == (0, 0, 0) for _, b in resin)                       # the composite has them in black
+    assert all(b == c for c, k_, b in pixels if k_ != (0, 0, 0))                 # and is the colour render elsewhere
 
 
 def test_preview_can_skip_the_composite(fakes, tmp_path):

@@ -28,7 +28,6 @@ classifiers = [
 ]
 dependencies = [
     "pyusb>=1.2",
-    "numpy>=1.26",
     "pillow>=10",
 ]
 

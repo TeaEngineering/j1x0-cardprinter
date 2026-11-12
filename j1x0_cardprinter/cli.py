@@ -34,9 +34,8 @@ import tempfile
 import time
 from pathlib import Path
 
-import numpy as np
 import usb.core
-from PIL import Image
+from PIL import ImageOps
 
 from .library import default_dir
 from .printer import Printer
@@ -338,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out.mkdir(parents=True, exist_ok=True)
         card.colour.save(args.out / "colour.png")
         if card.k_mask is not None:
-            Image.fromarray(np.where(card.k_mask, 0, 255).astype(np.uint8)).save(args.out / "k.png")
+            ImageOps.invert(card.k_mask).save(args.out / "k.png")           # black dots on white
         if args.composite:
             composite(card).save(args.out / "composite.png")
         return 0

@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol
 
-import numpy as np
 from PIL import Image
 
 from .template import Template
@@ -216,7 +215,7 @@ def make_rasteriser(name: str = "inkscape") -> Rasteriser:
 @dataclass
 class CardRaster:
     colour: Image.Image                 # RGB, CARD_W x CARD_H
-    k_mask: np.ndarray | None           # bool, shape (CARD_H, CARD_W); True = resin dot
+    k_mask: Image.Image | None          # mode "L", CARD_W x CARD_H; 255 = resin dot, 0 = none
 
 
 def render_card(
@@ -234,14 +233,14 @@ def render_card(
     k_mask = None
     if has_k:
         grey = rasteriser.render(template.render(values, only_layers=[k_layer]), CARD_W, CARD_H)
-        mask = np.asarray(grey.convert("L")) < threshold
-        k_mask = mask if mask.any() else None
+        mask = grey.convert("L").point([255 if v < threshold else 0 for v in range(256)])
+        k_mask = mask if mask.getbbox() else None            # no dots at all: no resin panel
     return CardRaster(colour=colour, k_mask=k_mask)
 
 
 def composite(card: CardRaster) -> Image.Image:
     """The colour render with the resin layer overprinted in black: what the card should look like."""
-    pixels = np.asarray(card.colour).copy()
+    image = card.colour.convert("RGB").copy()
     if card.k_mask is not None:
-        pixels[card.k_mask] = 0
-    return Image.fromarray(pixels)
+        image.paste((0, 0, 0), mask=card.k_mask)
+    return image

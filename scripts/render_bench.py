@@ -6,6 +6,8 @@ For each test SVG it renders at the printer grid (1024 x 640) with both renderer
 compares pixels (Inkscape is the reference) and writes a contact sheet to OUTDIR. It also
 compares the result after conversion to the printer's 5-bit planes, which is what matters in
 the end: a difference of one level in 32 is invisible on a dye-sub card.
+
+Needs numpy (`pip install numpy`), which the package itself no longer depends on.
 """
 
 from __future__ import annotations

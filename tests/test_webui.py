@@ -3,7 +3,6 @@ import io
 import json
 import threading
 
-import numpy as np
 import pytest
 from PIL import Image
 
@@ -28,8 +27,8 @@ class FakeRasteriser:
     """Stands in for Inkscape: a horizontal gradient, so the card has colour and resin dots."""
 
     def render(self, svg, width, height):
-        row = np.linspace(0, 255, width).astype(np.uint8)
-        return Image.fromarray(np.tile(row, (height, 1))).convert("RGB")
+        row = bytes(round(i * 255 / (width - 1)) for i in range(width))
+        return Image.frombytes("L", (width, height), row * height).convert("RGB")
 
 
 class FakeCairo(CairoRasteriser, FakeRasteriser):

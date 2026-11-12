@@ -135,7 +135,6 @@ def test_quiet_by_default(caplog):
 
 # ── Where the acknowledgement is asked for ───────────────────────────────────
 
-import numpy as np                                          # noqa: E402
 
 from j1x0_cardprinter.encode import DOTS, LINES, pack_plane  # noqa: E402
 from j1x0_cardprinter.jobparse import parse_job             # noqa: E402
@@ -144,7 +143,7 @@ from j1x0_cardprinter.protocol import build_job             # noqa: E402
 
 def real_job():
     """A whole card as the Windows driver sent it: three planes and a resin bitmap."""
-    plane = pack_plane(np.full((LINES, DOTS), 1, np.uint8))
+    plane = pack_plane(bytes([1]) * (LINES * DOTS))
     return build_job([plane, plane, plane], bytes(LINES * DOTS // 8))
 
 

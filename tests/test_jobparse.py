@@ -1,4 +1,4 @@
-import numpy as np
+from PIL import Image
 
 from j1x0_cardprinter.encode import DOTS, LINES, pack_mono, pack_plane
 from j1x0_cardprinter.jobparse import parse_job
@@ -6,12 +6,12 @@ from j1x0_cardprinter.protocol import build_job, cmd, mono_block, plane_block
 
 
 def plane_payload(value=1):
-    return pack_plane(np.full((LINES, DOTS), value, np.uint8))
+    return pack_plane(bytes([value]) * (LINES * DOTS))
 
 
 def good_job(resin=True):
-    mask = np.zeros((DOTS, LINES), bool)
-    mask[0, 0] = True
+    mask = Image.new("L", (LINES, DOTS), 0)
+    mask.putpixel((0, 0), 255)
     k = pack_mono(mask) if resin else None
     return build_job([plane_payload(), plane_payload(3), plane_payload(5)], k)
 
@@ -39,7 +39,7 @@ def test_a_job_without_resin_has_the_blank_marker():
 
 
 def test_a_truncated_plane_is_flagged():
-    short = pack_plane(np.full((10, DOTS), 1, np.uint8))              # 10 lines instead of 1024
+    short = pack_plane(bytes([1]) * (10 * DOTS))              # 10 lines instead of 1024
     segments = parse_job(cmd("MASTER") + plane_block(0, short) + cmd("IV 30"))
     plane = next(s for s in segments if s.kind == "image")
     # Once its real data runs out the parser walks on into the next commands, as a printer would.
@@ -54,9 +54,9 @@ def test_a_bad_line_terminator_is_flagged():
 
 
 def test_stuffed_0x5b_bytes_are_counted_once():
-    mask = np.zeros((DOTS, LINES), bool)
+    mask = Image.new("L", (LINES, DOTS), 0)
     for dot in (1, 3, 4, 6, 7):                          # the byte 0x5B in the first line sent
-        mask[dot, LINES - 1] = True
+        mask.putpixel((LINES - 1, dot), 255)
     payload = pack_mono(mask)
     assert payload[:2] == b"\x5b\x5b" and len(payload) == 81921
     bitmap = next(s for s in parse_job(mono_block(payload)) if "resin" in s.text)
