@@ -1,4 +1,4 @@
-"""Card Printer.app: a thin macOS shell around the j1x0 web UI.
+"""J1x0 Card Printer.app: a thin macOS shell around the j1x0 web UI.
 
 The app starts the same local web page `j1x0` serves, on this computer only, opens it in the browser, and
 gives it a Dock icon and a menu (open it again, open the designs folder, quit). Quitting stops the page and
@@ -21,7 +21,7 @@ from pathlib import Path
 CONTENTS = Path(os.environ["J1X0_APP_CONTENTS"]) if os.environ.get("J1X0_APP_CONTENTS") else None
 FRAMEWORKS = CONTENTS / "Frameworks" if CONTENTS else None
 RESOURCES = CONTENTS / "Resources" if CONTENTS else None
-LOG = Path.home() / "Library" / "Logs" / "Card Printer" / "card-printer.log"
+LOG = Path.home() / "Library" / "Logs" / "J1x0 Card Printer" / "card-printer.log"
 
 # ctypes.util.find_library names -> the library file shipped in Contents/Frameworks
 BUNDLED = {
@@ -129,7 +129,7 @@ def run_app() -> None:
             except Exception as exc:                       # no renderer, port trouble, ...
                 log.exception("could not start")
                 alert = NSAlert.alloc().init()
-                alert.setMessageText_("Card Printer could not start")
+                alert.setMessageText_("J1x0 Card Printer could not start")
                 alert.setInformativeText_(f"{exc}\n\nThe log is at {LOG}")
                 alert.runModal()
                 NSApplication.sharedApplication().terminate_(None)
@@ -161,7 +161,7 @@ def run_app() -> None:
 
         def build_menu(self):
             application = NSApplication.sharedApplication()
-            name = NSBundle.mainBundle().infoDictionary().get("CFBundleName") or "Card Printer"
+            name = NSBundle.mainBundle().infoDictionary().get("CFBundleName") or "J1x0 Card Printer"
             menubar, top, menu = NSMenu.alloc().init(), NSMenuItem.alloc().init(), NSMenu.alloc().init()
             menubar.addItem_(top)
             top.setSubmenu_(menu)

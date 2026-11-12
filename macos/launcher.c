@@ -3,9 +3,9 @@
  * process, and run j1x0_macapp. Running Python in-process (not as a child) keeps this the app's one
  * process, so the Dock icon, the menu bar name and macOS's idea of "the app" are all right.
  *
- *   Card Printer.app/Contents/MacOS/CardPrinter     this program
- *   Card Printer.app/Contents/Resources/python/     the relocatable Python (lib/libpython3.x.dylib, ...)
- *   Card Printer.app/Contents/Resources/app/        j1x0_macapp.py
+ *   J1x0 Card Printer.app/Contents/MacOS/CardPrinter     this program
+ *   J1x0 Card Printer.app/Contents/Resources/python/     the relocatable Python (lib/libpython3.x.dylib, ...)
+ *   J1x0 Card Printer.app/Contents/Resources/app/        j1x0_macapp.py
  */
 #include <dlfcn.h>
 #include <limits.h>
@@ -19,7 +19,7 @@
 #endif
 
 static void fail(const char *what, const char *detail) {
-    fprintf(stderr, "Card Printer: %s%s%s\n", what, detail ? ": " : "", detail ? detail : "");
+    fprintf(stderr, "J1x0 Card Printer: %s%s%s\n", what, detail ? ": " : "", detail ? detail : "");
     exit(1);
 }
 

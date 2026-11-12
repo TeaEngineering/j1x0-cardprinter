@@ -1,6 +1,6 @@
-# Card Printer for macOS
+# J1x0 Card Printer for macOS
 
-`build_app.py` builds **Card Printer.app**, a double-click version of `j1x0` for Apple Silicon Macs, and
+`build_app.py` builds **J1x0 Card Printer.app**, a double-click version of `j1x0` for Apple Silicon Macs, and
 optionally a signed, notarised `.dmg` to hand to someone. It is not part of the PyPI package.
 
 The app starts the same local web page as `j1x0 ui` (on this computer only), opens it in the browser, and gives
@@ -28,15 +28,15 @@ as `sans-serif`; see `../docs/rendering.md`. The menu says which one is in use.
 Needs an Apple Silicon Mac with the Xcode command line tools, and Homebrew with `cairo` and `libusb`
 (`brew install cairo libusb`).
 
-    python macos/build_app.py                      # dist/Card Printer.app, ad-hoc signed: runs on this Mac
-    python macos/build_app.py --dmg                # and dist/Card-Printer-<version>-arm64.dmg
+    python macos/build_app.py                      # dist/J1x0 Card Printer.app, ad-hoc signed: runs on this Mac
+    python macos/build_app.py --dmg                # and dist/J1x0-Card-Printer-<version>-arm64.dmg
 
 An ad-hoc build is fine for testing. On another Mac it is blocked by Gatekeeper ("cannot be opened because the
 developer cannot be verified"): the person has to right-click the app and choose Open once. For a build that opens
 with a double-click anywhere it must be signed with a **Developer ID Application** certificate and notarised.
 
 The build ends with a self-test (below). The exact package versions are in `requirements-lock.txt`; delete it to
-build with the latest, and copy the new `dist/Card Printer-requirements.txt` over it.
+build with the latest, and copy the new `dist/J1x0 Card Printer-requirements.txt` over it.
 
 ## Releasing: signing and notarising
 
@@ -60,8 +60,8 @@ Then:
 It signs every binary with the hardened runtime and a secure timestamp, notarises and staples the app, builds the
 disk image from it, signs, notarises and staples that too. Check the result with:
 
-    spctl -a -vv -t exec "dist/Card Printer.app"    # accepted, source=Notarized Developer ID
-    xcrun stapler validate Card-Printer-0.1.1-arm64.dmg
+    spctl -a -vv -t exec "dist/J1x0 Card Printer.app"    # accepted, source=Notarized Developer ID
+    xcrun stapler validate J1x0-Card-Printer-0.1.1-arm64.dmg
 
 The bundle identifier defaults to `com.teaengineering.cardprinter` (`--bundle-id` to change it).
 
@@ -71,14 +71,14 @@ The bundle identifier defaults to `com.teaengineering.cardprinter` (`--bundle-id
 job pipeline works, PyObjC imports, and that **no library is loaded from outside the app and the system** (so nothing
 leaks in from Homebrew). Run it with a clean environment, as the build does:
 
-    env -i HOME=$HOME PATH=/usr/bin:/bin "dist/Card Printer.app/Contents/MacOS/CardPrinter" --self-test
+    env -i HOME=$HOME PATH=/usr/bin:/bin "dist/J1x0 Card Printer.app/Contents/MacOS/CardPrinter" --self-test
 
 For a full run without opening a browser tab, and with a throwaway designs folder or a forced renderer:
 
     env -i HOME=$HOME PATH=/usr/bin:/bin J1X0_APP_NO_BROWSER=1 J1X0_TEMPLATES=/tmp/designs J1X0_RENDERER=cairosvg \
-        "dist/Card Printer.app/Contents/MacOS/CardPrinter"
+        "dist/J1x0 Card Printer.app/Contents/MacOS/CardPrinter"
 
-The log is `~/Library/Logs/Card Printer/card-printer.log`.
+The log is `~/Library/Logs/J1x0 Card Printer/card-printer.log`.
 
 ## Notes
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build "Card Printer.app" for Apple Silicon Macs, and optionally a signed, notarised .dmg.
+"""Build "J1x0 Card Printer.app" for Apple Silicon Macs, and optionally a signed, notarised .dmg.
 
     python macos/build_app.py                                  # a local app: ad-hoc signed, runs on this Mac
     python macos/build_app.py --identity "Developer ID Application: Name (TEAMID)" --dmg --notarize PROFILE
@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HERE = Path(__file__).resolve().parent
 CACHE = HERE / ".cache"
 
-APP_NAME = "Card Printer"
+APP_NAME = "J1x0 Card Printer"
 EXECUTABLE = "CardPrinter"
 DEFAULT_BUNDLE_ID = "com.teaengineering.cardprinter"
 MIN_MACOS = "13.0"
