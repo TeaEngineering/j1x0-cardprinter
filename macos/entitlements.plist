@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Python loads many extension modules and libraries; they are all signed with the same identity as the
+         app, but not every one of them is covered by the strict "same team" library check. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- PyObjC (and libffi's closures behind it) need to create executable memory at run time. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

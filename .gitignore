@@ -33,3 +33,6 @@ captures/
 
 # Local run logs
 sending.log
+
+# macOS app build: downloaded Python runtime
+macos/.cache/
