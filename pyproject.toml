@@ -1,14 +1,31 @@
 [build-system]
-requires = ["hatchling>=1.21"]
+requires = ["hatchling>=1.21", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "j1x0-cardprinter"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Print SVG card designs on J1x0-series card printers over raw USB"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
 authors = [
     { name = "Chris Shucksmith", email = "chris@shucksmith.co.uk" },
+]
+keywords = ["card printer", "id card", "dye-sublimation", "svg", "usb", "libusb", "j110i"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Printing",
+    "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 dependencies = [
     "pyusb>=1.2",
@@ -23,8 +40,35 @@ dev = ["pytest>=8"]
 [project.scripts]
 j1x0 = "j1x0_cardprinter.cli:main"
 
+[project.urls]
+Homepage      = "https://github.com/TeaEngineering/j1x0-cardprinter"
+Repository    = "https://github.com/TeaEngineering/j1x0-cardprinter"
+Documentation = "https://github.com/TeaEngineering/j1x0-cardprinter/tree/main/docs"
+Issues        = "https://github.com/TeaEngineering/j1x0-cardprinter/issues"
+
+# ── Build / packaging ─────────────────────────────────────────────────────────
+
+[tool.hatch.version]
+source = "vcs"
+
 [tool.hatch.build.targets.wheel]
 packages = ["j1x0_cardprinter"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/j1x0_cardprinter",
+    "/docs",
+    "/examples",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
+exclude = [
+    "**/__pycache__",
+    "**/.DS_Store",
+]
+
+# ── Test ──────────────────────────────────────────────────────────────────────
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
