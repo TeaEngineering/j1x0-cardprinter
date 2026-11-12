@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="85.6mm" height="54mm" viewBox="0 0 85.6 54">
+  <!-- Colour artwork: printed with the Y/M/C ribbon panels. -->
+  <g inkscape:groupmode="layer" inkscape:label="Design">
+    <rect width="85.6" height="54" fill="#dfe9f7"/>
+    <rect width="85.6" height="12" fill="#1f4e9c"/>
+    <text x="5" y="8" font-family="sans-serif" font-size="5" fill="#ffffff">Example Co</text>
+    <text xml:space="preserve" x="5" y="26" font-family="sans-serif" font-size="6" fill="#1f4e9c"><tspan>$firstName$</tspan><tspan> $lastName$</tspan></text>
+  </g>
+  <!-- Black resin layer: printed with the K panel. Name the layer exactly "K". -->
+  <g inkscape:groupmode="layer" inkscape:label="K">
+    <text x="5" y="46" font-family="monospace" font-size="4" fill="#000000">ID $cardNo$</text>
+  </g>
+</svg>

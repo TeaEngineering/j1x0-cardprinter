@@ -1,0 +1,26 @@
+# Proprietary NBS Technologies material: installer, extracted binaries, help, marketing PDFs
+/javelin_value_class_*.exe
+/blobs/
+/help/
+/*.pdf
+
+# Ghidra project (binary databases, locks) built from the blobs
+/ghidra/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+/.venv/
+/venv*/
+.pytest_cache/
+
+# Generated output
+/out/
+*.bin
+
+# Local tool state
+.claude/
+.DS_Store
