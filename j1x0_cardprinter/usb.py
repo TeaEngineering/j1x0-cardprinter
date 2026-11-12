@@ -1,12 +1,12 @@
 """Raw USB transport for the J1x0-series card printers.
 
-`J1x0USB` is the real-device link, modelled on rollingmill's `MdxUSB`: find the device, detach any
-kernel driver, claim the printer interface and cache the bulk endpoints.
+`J1x0USB` is the real-device link: find the device, detach any kernel driver, claim the printer
+interface and cache the bulk endpoints.
 
-The VID/PID are not known yet (the INF only has the hardware id
-`USBPRINT\\JAVEL_CARD_PRINTERJ1702A`, which Windows derives from the printer's IEEE-1284 device
-id). `list_printers` therefore enumerates every USB printer-class device and reads that id, so the
-printer can be found without a VID/PID.
+The J110i is `0a5f:005c` (`KNOWN_PRINTERS`). Other models are found without a VID/PID:
+`list_printers` enumerates every USB printer-class device and matches its strings or IEEE-1284 id
+(the INF only has the hardware id `USBPRINT\\JAVEL_CARD_PRINTERJ1702A`, which Windows derives from
+that id).
 
 `J1x0MockUSB` implements the same interface without touching USB; it records what was written so
 tests can inspect job streams.
@@ -117,7 +117,7 @@ def get_device_id(dev: Any, intf_num: int, alt: int = 0, timeout: int = 500) -> 
     """USB printer-class GET_DEVICE_ID. Returns "" if the device does not answer.
 
     wValue is the configuration, wIndex is (interface << 8 | alternate setting) per the printer
-    class spec; the interface-number-only form is tried as a fallback (what rollingmill uses).
+    class spec; the interface-number-only form is tried as a fallback.
     A J110i ignores this request altogether, so a timeout ends the attempt at once.
     """
     try:
@@ -230,8 +230,8 @@ class J1x0USB:
                  soft_reset: bool = False) -> "J1x0USB":
         """Open the printer. With no VID/PID, find the one printer that identifies as a J1x0.
 
-        `soft_reset` sends the printer-class SOFT_RESET after opening (rollingmill does this for
-        the MDX). It can interrupt a job in progress, so it is off by default.
+        `soft_reset` sends the printer-class SOFT_RESET after opening. It can interrupt a job in
+        progress, so it is off by default (the Windows monitor sends none).
         """
         info = None
         if vid is None or pid is None:
