@@ -182,7 +182,6 @@ async function render() {
   try {
     const result = await postJSON("/api/render", {
       design: state.design, values: state.values,
-      flip_lines: $("flip-lines").checked, flip_dots: $("flip-dots").checked,
     });
     if (seq !== state.seq) return;
     state.renderId = result.id;
@@ -294,7 +293,6 @@ $("print").addEventListener("click", print);
 $("reload").addEventListener("click", loadDesigns);
 $("status-refresh").addEventListener("click", refreshStatus);
 $("details").addEventListener("click", showDetails);
-for (const id of ["flip-lines", "flip-dots"]) $(id).addEventListener("change", render);
 $("force").addEventListener("change", updateUI);
 
 loadDesigns().catch((error) => showOverlay(error.message, true));

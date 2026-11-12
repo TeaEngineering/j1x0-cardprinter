@@ -1,12 +1,10 @@
 """Pixel data -> printer payloads (docs/image-data.md).
 
-Colour planes carry a 5-bit dye density per dot, run-length encoded. The black resin panel is
-a 1-bit bitmap. Both are streamed as 1024 head lines of 640 dots.
+Colour planes carry a 5-bit dye density per dot, packed three to a 16-bit word. The black resin
+panel is a 1-bit bitmap. Both are streamed as 1024 head lines of 640 dots.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import numpy as np
 
@@ -15,29 +13,15 @@ DOTS = 640          # dots per head line (short edge)
 LEVELS = 32         # density levels named in the plane header
 
 
-@dataclass(frozen=True)
-class Orientation:
-    """How an upright (DOTS rows x LINES columns) card image maps onto the stream.
+def stream_order(image: np.ndarray) -> np.ndarray:
+    """(DOTS, LINES) image array -> (LINES, DOTS) array in stream order: line i is image column i.
 
-    UNVERIFIED (docs/open-questions.md Q3). The default makes stream line i the image
-    column i and dot j the image row j. The Windows driver's default turns the page 180
-    degrees relative to its surface, so `Orientation(flip_lines=True, flip_dots=True)` is the
-    other obvious candidate; settle it with an asymmetric test card.
+    This is how the Windows driver sends an upright card; decoding a captured job back into an image
+    gives the card the right way up (docs/captured-job.md).
     """
-
-    flip_lines: bool = False
-    flip_dots: bool = False
-
-    def apply(self, image: np.ndarray) -> np.ndarray:
-        """(DOTS, LINES) array -> (LINES, DOTS) array in stream order."""
-        if image.shape[:2] != (DOTS, LINES):
-            raise ValueError(f"expected {(DOTS, LINES)} image, got {image.shape[:2]}")
-        lines = image.T
-        if self.flip_lines:
-            lines = lines[::-1]
-        if self.flip_dots:
-            lines = lines[:, ::-1]
-        return np.ascontiguousarray(lines)
+    if image.shape[:2] != (DOTS, LINES):
+        raise ValueError(f"expected {(DOTS, LINES)} image, got {image.shape[:2]}")
+    return np.ascontiguousarray(image.T)
 
 
 # ── Colour preparation ───────────────────────────────────────────────────────
@@ -88,34 +72,42 @@ def colour_planes(prepared: np.ndarray) -> list[np.ndarray]:
 
 # ── Payload encoders ─────────────────────────────────────────────────────────
 
-def rle_plane(samples: np.ndarray) -> bytes:
-    """Run-length encode 5-bit samples in stream order.
+WORDS_PER_LINE = -(-DOTS // 3)          # 214: three samples per word, the last word holds one
+LINE_BYTES = WORDS_PER_LINE * 2 + 4     # 432: the words, then four zero bytes
 
-    A lone value is one byte (< 0x80). A run of n in 2..127 is (0x80 + n, value). Runs longer
-    than 127 are split into 127-runs (0xFF, value) plus a remainder. State is not reset between
-    lines, so call this once for the whole plane.
+
+def pack_plane(samples: np.ndarray) -> bytes:
+    """Pack 5-bit samples in stream order (LINES x DOTS) into the plane payload.
+
+    As the Windows driver does it (`FUN_180014540`, confirmed against a captured job): each line is
+    214 big-endian 16-bit words `0 | s0 (5 bits) | s1 | s2`, the last holding only sample 639 in the
+    top field, then four zero bytes: 432 bytes a line, 442368 a plane. No run-length coding.
     """
-    s = np.asarray(samples, dtype=np.uint8).ravel()
-    if s.size == 0:
-        return b""
-    starts = np.concatenate(([0], np.flatnonzero(np.diff(s)) + 1))
-    lengths = np.diff(np.concatenate((starts, [s.size])))
-    out = bytearray()
-    for value, count in zip(s[starts].tolist(), lengths.tolist()):
-        full, rem = divmod(count, 127)
-        out += bytes((0xFF, value)) * full
-        if rem == 1:
-            out.append(value)
-        elif rem:
-            out += bytes((0x80 + rem, value))
-    return bytes(out)
+    s = np.asarray(samples, dtype=np.uint16).reshape(-1, DOTS)
+    lines = s.shape[0]
+    padded = np.zeros((lines, WORDS_PER_LINE * 3), np.uint16)
+    padded[:, :DOTS] = s
+    triples = padded.reshape(lines, WORDS_PER_LINE, 3)
+    words = (triples[..., 0] << 10) | (triples[..., 1] << 5) | triples[..., 2]
+    out = np.zeros((lines, LINE_BYTES), np.uint8)
+    out[:, 0:WORDS_PER_LINE * 2:2] = words >> 8
+    out[:, 1:WORDS_PER_LINE * 2:2] = words & 0xFF
+    return out.tobytes()
 
 
-def encode_plane(plane: np.ndarray, orientation: Orientation) -> bytes:
-    return rle_plane(orientation.apply(plane))
+def unpack_plane(payload: bytes) -> np.ndarray:
+    """The inverse of `pack_plane`: payload -> (lines, DOTS) array of 5-bit samples."""
+    rows = np.frombuffer(payload, np.uint8).reshape(-1, LINE_BYTES)
+    words = (rows[:, 0:WORDS_PER_LINE * 2:2].astype(np.uint16) << 8) | rows[:, 1:WORDS_PER_LINE * 2:2]
+    samples = np.stack(((words >> 10) & 31, (words >> 5) & 31, words & 31), axis=-1)
+    return samples.reshape(len(rows), -1)[:, :DOTS].astype(np.uint8)
 
 
-def pack_mono(mask: np.ndarray, orientation: Orientation) -> bytes:
+def encode_plane(plane: np.ndarray) -> bytes:
+    return pack_plane(stream_order(plane))
+
+
+def pack_mono(mask: np.ndarray) -> bytes:
     """True = resin dot -> 1024 lines x 80 bytes, MSB first, with 0x5B doubled."""
-    lines = orientation.apply(mask.astype(np.uint8))
+    lines = stream_order(mask.astype(np.uint8))
     return np.packbits(lines, axis=1).tobytes().replace(b"\x5b", b"\x5b\x5b")

@@ -34,11 +34,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from PIL import Image, ImageOps
 
-from .encode import Orientation
 from .library import Design, discover, humanise
 from .printer import Printer
-from .probe import check_link
+from .probe import check_link, quick_check
 from .raster import CairoRasteriser, InkscapeShellRasteriser, Rasteriser, composite, render_card
+from .sender import send_job
 from .template import MissingField, Template
 from .usb import DeviceSelectionError, J1x0USB
 
@@ -128,11 +128,10 @@ class CardApp:
         design = self._design(name)
         template = self._template(design)
         images = set(template.image_fields())
-        return {
-            "name": design.name, "title": design.title,
-            "fields": [{"name": f, "label": humanise(f), "kind": "image" if f in images else "text"}
-                       for f in template.fields()],
-        }
+        fields = [{"name": f, "label": humanise(f), "kind": "image" if f in images else "text"}
+                  for f in template.fields()]
+        fields.sort(key=lambda f: f["kind"] == "image")     # file pickers after the text boxes
+        return {"name": design.name, "title": design.title, "fields": fields}
 
     def thumbnail(self, name: str) -> bytes:
         """A small preview of the design with its field names as placeholder text."""
@@ -186,8 +185,7 @@ class CardApp:
         except Exception as exc:                         # the rasteriser failed
             raise AppError(500, f"Could not draw the card: {exc}") from exc
 
-    def render(self, design_name: str, values: dict, flip_lines: bool = False,
-               flip_dots: bool = False) -> dict:
+    def render(self, design_name: str, values: dict) -> dict:
         """Render the card and keep its job. The id it returns is what Print sends."""
         design = self._design(design_name)
         template = self._template(design)
@@ -197,9 +195,7 @@ class CardApp:
             value = str(values.get(field, "") or "")
             resolved[field] = str(self._upload_path(value)) if field in images else value
         card = self._draw(template, resolved)
-        printer = Printer(rasteriser=self.rasteriser,
-                          orientation=Orientation(flip_lines=flip_lines, flip_dots=flip_dots),
-                          seed=secrets.randbits(32))
+        printer = Printer(rasteriser=self.rasteriser, seed=secrets.randbits(32))
         warnings = []
         if isinstance(self.rasteriser, CairoRasteriser):
             warnings = [f"cairosvg can't draw: {p}" for p in template.cairosvg_problems()]
@@ -222,8 +218,8 @@ class CardApp:
     # ── Printer ──────────────────────────────────────────────────────────────
 
     def status(self, full: bool = False) -> dict:
-        """Printer state for the status chip. Quick = just the USB status byte; full = the whole
-        link check (slower; asks the printer questions)."""
+        """Printer state for the status chip. Quick = the USB status byte, or one version query for
+        a printer that has no status byte; full = the whole link check (slower)."""
         if self._busy:
             return {"state": "printing", "ready": False, "message": "Sending a card to the printer…"}
         try:
@@ -233,11 +229,11 @@ class CardApp:
                     return {"state": "ready" if report.ready else "attention", "ready": report.ready,
                             "message": "Printer ready" if report.ready else _attention(report.problems),
                             "lines": report.lines(), "problems": report.problems}
-                status = link.port_status()
-                if status.ok_to_open:
+                ready, reason = quick_check(link)
+                if ready:
                     return {"state": "ready", "ready": True, "message": "Printer ready"}
                 return {"state": "attention", "ready": False,
-                        "message": "Printer needs attention. Check the cover, ribbon and cards."}
+                        "message": f"The printer is not ready: {reason}."}
         except DeviceSelectionError as exc:
             return _no_printer(str(exc))
         except RuntimeError as exc:
@@ -273,9 +269,13 @@ class CardApp:
                 if not report.ready and not force:
                     self._finish(job, "error", _attention(report.problems))
                     return
-                job["message"] = "Sending the card to the printer…"
-                sent = link.write(rendered.job)
-            self._finish(job, "done", f"Sent to the printer ({sent // 1024} KB). The card will print now.")
+
+                def progress(sent: int, total: int) -> None:
+                    job["message"] = f"Sending the card to the printer… {sent * 100 // total}%"
+
+                result = send_job(link, rendered.job, progress=progress)
+            self._finish(job, "done", f"Sent to the printer ({result.bytes_sent // 1024} KB). "
+                                      "The card will print now.")
         except DeviceSelectionError as exc:
             self._finish(job, "error", _no_printer(str(exc))["message"])
         except Exception as exc:
@@ -412,9 +412,7 @@ def make_server(app: CardApp, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
                     return self._json(200, {"id": app.save_upload(self._body(MAX_UPLOAD))})
                 if path == "/api/render":
                     data = self._json_body()
-                    return self._json(200, app.render(
-                        str(data.get("design", "")), data.get("values") or {},
-                        bool(data.get("flip_lines")), bool(data.get("flip_dots"))))
+                    return self._json(200, app.render(str(data.get("design", "")), data.get("values") or {}))
                 if path == "/api/print":
                     data = self._json_body()
                     return self._json(200, app.start_print(str(data.get("id", "")),

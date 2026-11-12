@@ -9,7 +9,9 @@ def test_cmd_framing():
 
 
 def test_plane_block_matches_driver_format():
-    assert plane_block(1, b"XY") == b"\x1b$F\r\x1bGS 1 32 0 0 1024 640 XY\r\x1bIS 1\r"
+    # only plane 0 is preceded by ESC $F CR (docs/captured-job.md)
+    assert plane_block(0, b"XY") == b"\x1b$F\r\x1bGS 0 32 0 0 1024 640 XY\r\x1bIS 0\r"
+    assert plane_block(1, b"XY") == b"\x1bGS 1 32 0 0 1024 640 XY\r\x1bIS 1\r"
 
 
 def test_mono_block_matches_driver_format():
@@ -18,9 +20,15 @@ def test_mono_block_matches_driver_format():
 
 def test_job_without_resin_uses_blank_marker():
     job = build_job([b"a", b"b", b"c"], None)
-    assert job.startswith(b"\x1bMASTER\r\x1bJOB 0\r\x1bSXY 1\r")
+    # MASTER twice (monitor and driver), then JOB, SXY and the default tuning of 5
+    assert job.startswith(b"\x1bMASTER\r\x1bMASTER\r\x1bJOB 0\r\x1bSXY 1\r\x1b+$C 0 5\r")
     assert NO_RESIN == b"\x1bF\r\x1b!FF 1\r" and NO_RESIN in job
     assert job.endswith(b"\x1bvF\r\x1bIV 30\r")
+
+
+def test_end_of_card_is_mo_alone():
+    from j1x0_cardprinter.protocol import end_of_card
+    assert end_of_card() == b"\x1bMO\r"
 
 
 def test_job_order_and_options():

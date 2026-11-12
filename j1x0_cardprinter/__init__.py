@@ -3,11 +3,10 @@
 Pipeline (see docs/protocol.md for the wire format):
 
     Template (SVG + $tokens$)  ->  raster (Y/M/C colour + K mask)
-        ->  encode (5-bit RLE planes, 1-bit K bitmap)
+        ->  encode (packed 5-bit planes, 1-bit K bitmap)
         ->  protocol (ESC command stream)  ->  usb (libusb bulk write)
 """
 
-from .encode import Orientation
 from .printer import Printer
 from .protocol import JobOptions, Overlay, Tuning
 from .template import MissingField, Template
@@ -18,7 +17,6 @@ __all__ = [
     "J1x0USB",
     "JobOptions",
     "MissingField",
-    "Orientation",
     "Overlay",
     "Printer",
     "Template",

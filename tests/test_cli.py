@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from j1x0_cardprinter import cli
+from j1x0_cardprinter.protocol import end_of_card
 from j1x0_cardprinter.usb import J1x0MockUSB
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -57,7 +58,7 @@ def test_send_writes_the_file_exactly(fakes, tmp_path):
     job = tmp_path / "job.bin"
     job.write_bytes(cli.JOB_PREFIX + b"payload")
     assert cli.main(["send", str(job), "--vid", "0x1", "--pid", "0x2"]) == 0
-    assert fakes.stream == job.read_bytes()
+    assert fakes.stream == job.read_bytes() + end_of_card()     # the file, then the end of the card
     assert len(fakes.queries) == 7                  # the link was checked first
 
 
@@ -82,14 +83,14 @@ def test_not_ready_blocks_the_job_unless_forced(fakes, tmp_path, capsys):
     assert cli.main(["send", str(job)]) == 1
     assert fakes.sent == [] and "--force" in capsys.readouterr().err
     assert cli.main(["send", str(job), "--force"]) == 0
-    assert fakes.stream == job.read_bytes()
+    assert fakes.stream == job.read_bytes() + end_of_card()
 
 
 def test_no_check_skips_the_queries(fakes, tmp_path):
     job = tmp_path / "job.bin"
     job.write_bytes(cli.JOB_PREFIX)
     assert cli.main(["send", str(job), "--no-check"]) == 0
-    assert fakes.queries == [] and fakes.stream == cli.JOB_PREFIX
+    assert fakes.queries == [] and fakes.stream == cli.JOB_PREFIX + end_of_card()
 
 
 def test_autodetect_failure_is_reported_cleanly(monkeypatch, capsys):
@@ -106,7 +107,7 @@ def test_send_warns_about_unrecognised_files(fakes, tmp_path, capsys):
     job.write_bytes(b"not a job")
     assert cli.main(["send", str(job), "--vid", "1", "--pid", "2"]) == 0
     assert "does not start with ESC MASTER" in capsys.readouterr().err
-    assert fakes.stream == b"not a job"
+    assert fakes.stream == b"not a job" + end_of_card()
 
 
 def test_send_rejects_an_empty_file(fakes, tmp_path):
@@ -135,7 +136,7 @@ def test_print_equals_render_then_send(fakes, tmp_path):
     assert cli.main(["print", TEST_CARD, "--seed", "3", "-o", str(saved),
                      "--vid", "1", "--pid", "2"]) == 0
     assert saved.read_bytes() == rendered.read_bytes()
-    assert fakes.stream == rendered.read_bytes()
+    assert fakes.stream == rendered.read_bytes() + end_of_card()
 
 
 def test_print_without_save_leaves_no_file_behind(fakes, tmp_path, capsys):
@@ -156,3 +157,97 @@ def test_render_with_fields(fakes, tmp_path):
     out = tmp_path / "card.bin"
     assert cli.main(["render", CARD, *VALUES, "-o", str(out)]) == 0
     assert out.stat().st_size > 1000
+
+
+# ── Paced sending and protocol logging ───────────────────────────────────────
+
+def small_job(tmp_path):
+    job = tmp_path / "job.bin"
+    job.write_bytes(cli.JOB_PREFIX + b"\x1bJOB 0\r\x1bIV 30\r")
+    return job
+
+
+def test_send_writes_in_chunks_and_asks_after_the_data_and_the_end_of_card(fakes, tmp_path):
+    job = tmp_path / "big.bin"
+    job.write_bytes(cli.JOB_PREFIX + b"x" * 9000)
+    assert cli.main(["send", str(job)]) == 0
+    assert [e for e in fakes.events if e[0] == "write"][:3] == [("write", 4096)] * 2 + [("write", 816)]
+    assert fakes.enquiries == 2                       # after the data, and after ESC MO
+
+
+def test_chunk_size_option(fakes, tmp_path):
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job), "--chunk", "10"]) == 0
+    assert [e for e in fakes.events if e[0] == "write"][:3] == [("write", 10), ("write", 10), ("write", 2)]
+
+
+def test_raw_writes_the_file_unpaced_and_unended(fakes, tmp_path, capsys):
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job), "--raw"]) == 0
+    assert fakes.stream == job.read_bytes() and fakes.enquiries == 0
+    assert "raw" in capsys.readouterr().out
+
+
+def test_no_end_leaves_off_the_end_of_card_commands(fakes, tmp_path):
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job), "--no-end"]) == 0
+    assert fakes.stream == job.read_bytes() and fakes.enquiries == 1
+
+
+def test_whatever_the_ribbon_the_card_ends_with_mo(fakes, tmp_path):
+    fakes._responses[b"\x1b!RIBBON\r"] = b"7\x06"
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job)]) == 0
+    assert fakes.stream == job.read_bytes() + b"\x1bMO\r"
+
+
+def test_a_printer_error_stops_the_send_with_a_clear_message(fakes, tmp_path, capsys):
+    fakes._enquiry_replies = [b"\x1551"]
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job)]) == 1
+    err = capsys.readouterr().err
+    assert "COVER OPEN" in err and "after 22 bytes were sent" in err
+    assert fakes.stream == job.read_bytes()           # the end-of-card commands were not sent
+
+
+def test_dash_v_logs_the_commands_before_or_after_the_subcommand(fakes, tmp_path, capsys):
+    job = small_job(tmp_path)
+    for argv in (["send", str(job), "-v"], ["-v", "send", str(job)]):
+        assert cli.main(argv) == 0
+        err = capsys.readouterr().err
+        assert "ESC MASTER" in err and "ESC JOB 0" in err and "ESC IV 30" in err
+        assert "end of card" in err and "done: 22 bytes" in err
+        assert "ESC E 2 ->" not in err                # that detail is for -vv
+
+
+def test_dash_vv_also_logs_each_acknowledgement(fakes, tmp_path, capsys):
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job), "-vv"]) == 0
+    err = capsys.readouterr().err
+    assert "ESC E 2 -> <ACK>" in err and "chunk 1: 22 B written (22 of 22)" in err
+    assert "end of block at byte 22: asking the printer" in err
+
+
+def test_without_v_there_is_progress_but_no_protocol_log(fakes, tmp_path, capsys):
+    job = small_job(tmp_path)
+    assert cli.main(["send", str(job)]) == 0
+    captured = capsys.readouterr()
+    assert "100%" in captured.out and "ESC MASTER" not in captured.err
+
+
+def test_log_file_gets_the_full_detail_even_without_v(fakes, tmp_path, capsys):
+    job = small_job(tmp_path)
+    log_file = tmp_path / "sending.log"
+    assert cli.main(["send", str(job), "--log", str(log_file)]) == 0
+    text = log_file.read_text()
+    assert "check  result:           READY" in text                       # the pre-flight report
+    assert "ESC MASTER" in text and "ESC E 2 -> <ACK>" in text and "done: 22 bytes" in text
+    assert "ESC MASTER" not in capsys.readouterr().err                    # the console stays quiet
+
+
+def test_log_file_records_a_failure(fakes, tmp_path, capsys):
+    fakes._enquiry_replies = [b"\x1551"]
+    job = small_job(tmp_path)
+    log_file = tmp_path / "sending.log"
+    assert cli.main(["send", str(job), "--log", str(log_file)]) == 1
+    assert "error: the printer reports an error: COVER OPEN (after 22 bytes were sent)" in log_file.read_text()

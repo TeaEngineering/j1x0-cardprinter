@@ -6,9 +6,10 @@ from typing import Mapping
 
 import numpy as np
 
-from .encode import Orientation, colour_planes, encode_plane, pack_mono, prepare_colour
+from .encode import colour_planes, encode_plane, pack_mono, prepare_colour
 from .protocol import JobOptions, build_job
 from .raster import CardRaster, InkscapeRasteriser, Rasteriser, render_card
+from .sender import send_job
 from .template import Template
 from .usb import J1x0Link
 
@@ -18,19 +19,17 @@ class Printer:
         self,
         link: J1x0Link | None = None,
         rasteriser: Rasteriser | None = None,
-        orientation: Orientation = Orientation(),
         seed: int | None = None,
     ) -> None:
         self.link = link
         self.rasteriser = rasteriser or InkscapeRasteriser()
-        self.orientation = orientation
         self._rng = np.random.default_rng(seed)
 
     def encode(self, card: CardRaster, options: JobOptions | None = None) -> bytes:
         """Turn an already-rendered card into the complete job byte stream."""
         prepared = prepare_colour(np.asarray(card.colour), rng=self._rng)
-        planes = [encode_plane(p, self.orientation) for p in colour_planes(prepared)]
-        k_payload = pack_mono(card.k_mask, self.orientation) if card.k_mask is not None else None
+        planes = [encode_plane(p) for p in colour_planes(prepared)]
+        k_payload = pack_mono(card.k_mask) if card.k_mask is not None else None
         return build_job(planes, k_payload, options)
 
     def build(
@@ -44,4 +43,4 @@ class Printer:
     ) -> int:
         if self.link is None:
             raise RuntimeError("Printer has no link; use build() for a dry run")
-        return self.link.write(self.build(template, values, options))
+        return send_job(self.link, self.build(template, values, options)).bytes_sent

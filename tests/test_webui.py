@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from j1x0_cardprinter import webui
+from j1x0_cardprinter.protocol import end_of_card
 from j1x0_cardprinter.raster import CairoRasteriser
 from j1x0_cardprinter.usb import DeviceSelectionError, J1x0MockUSB
 from j1x0_cardprinter.webui import AppError, CardApp, make_server
@@ -71,13 +72,14 @@ def test_designs_are_listed_with_readable_titles(app, designs):
     assert app.designs() == {"dir": str(designs), "designs": [{"name": "staff_badge", "title": "Staff badge"}]}
 
 
-def test_design_info_gives_labelled_fields_and_marks_images(app):
+def test_design_info_gives_labelled_fields_with_pictures_last(app):
     info = app.design_info("staff_badge")
     assert info["title"] == "Staff badge"
+    # In the SVG the photo comes before cardNo, but the form asks for the text boxes first.
     assert info["fields"] == [
         {"name": "firstName", "label": "First name", "kind": "text"},
-        {"name": "photo", "label": "Photo", "kind": "image"},
         {"name": "cardNo", "label": "Card no", "kind": "text"},
+        {"name": "photo", "label": "Photo", "kind": "image"},
     ]
 
 
@@ -110,12 +112,6 @@ def test_render_keeps_a_preview_and_a_job(app):
 
 def test_missing_values_render_blank_rather_than_failing(app):
     assert app.render("staff_badge", {})["id"]
-
-
-def test_orientation_flags_change_the_job(app):
-    plain = app._renders[app.render("staff_badge", VALUES)["id"]].job
-    flipped = app._renders[app.render("staff_badge", VALUES, flip_lines=True, flip_dots=True)["id"]].job
-    assert plain != flipped and len(plain) > 1000
 
 
 def test_only_the_most_recent_renders_are_kept(designs, link):
@@ -211,7 +207,7 @@ def test_print_sends_exactly_the_bytes_behind_the_preview(app, link):
     app.start_print(render["id"])
     app.wait_for_job()
     assert app.job()["state"] == "done"
-    assert link.stream == app._renders[render["id"]].job
+    assert link.stream == app._renders[render["id"]].job + end_of_card()
     assert "Sent to the printer" in app.job()["message"]
 
 
@@ -346,7 +342,7 @@ def test_the_whole_flow_over_http(server, link):
     assert status == 200 and json.loads(body)["designs"][0]["name"] == "staff_badge"
 
     status, _, body = call(server, "GET", "/api/designs/staff_badge")
-    assert [f["name"] for f in json.loads(body)["fields"]] == ["firstName", "photo", "cardNo"]
+    assert [f["name"] for f in json.loads(body)["fields"]] == ["firstName", "cardNo", "photo"]
 
     status, headers, body = call(server, "GET", "/api/designs/staff_badge/thumb.png")
     assert status == 200 and headers["Content-Type"] == "image/png" and body[:4] == b"\x89PNG"

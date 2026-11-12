@@ -15,30 +15,43 @@ sends that file, so it behaves exactly like `render` followed by `send`.
 that is all it does, then it exits: 0 if the printer is ready, 1 if not. With a job file it
 stops without sending if the printer is not ready (override with --force). The printer is found
 automatically from its IEEE-1284 id; pass --vid/--pid if that picks the wrong one or none.
+
+A job is sent the way the Windows driver does: in chunks of up to 4096 bytes, each followed by an
+`ESC E 2` enquiry that the printer must ACK, then the end-of-card commands (`--raw` writes the
+file as it is instead). `-v` logs the protocol: every command as it is sent, annotated. `-vv` also
+logs every USB transfer and every acknowledgement with timing. Either can go before or after the
+sub-command.
 """
 
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import logging
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
 import usb.core
 from PIL import Image
 
-from .encode import Orientation
 from .library import default_dir
 from .printer import Printer
 from .probe import check_link
 from .raster import RENDERERS, make_rasteriser, render_card
+from .sender import PrinterError, send_job
+from .protocol import cmd
+from .status import show_bytes
 from .template import Template
 from .usb import J1x0USB
 
 JOB_PREFIX = b"\x1bMASTER\r"
+HANG_DUMP_SECONDS = 120         # a USB call blocked this long gets its stack written to the log (the printer pauses for tens of seconds between panels)
+
+log = logging.getLogger(__name__)
 
 
 def _parse_sets(pairs: list[str]) -> dict[str, str]:
@@ -76,10 +89,48 @@ def _render_job(args: argparse.Namespace) -> bytes:
     template, values = _load_card(args)
     printer = Printer(
         rasteriser=_rasteriser(args, template),
-        orientation=Orientation(flip_lines=args.flip_lines, flip_dots=args.flip_dots),
         seed=args.seed,
     )
     return printer.build(template, values)
+
+
+def _setup_logging(verbose: int, logfile: Path | None = None) -> logging.Handler | None:
+    """0: warnings only; 1 (`-v`): the protocol, command by command; 2 (`-vv`): every transfer.
+
+    With `logfile` everything is also written there at full detail, flushed line by line so the trail
+    survives a hang or a kill. Returns the file handler, if any.
+    """
+    level = logging.WARNING if verbose <= 0 else logging.INFO if verbose == 1 else logging.DEBUG
+    formatter = logging.Formatter("%(relativeCreated)7.0f ms  %(message)s")
+    console = logging.StreamHandler()
+    console.setLevel(level)
+    console.setFormatter(formatter)
+    console.addFilter(lambda record: not getattr(record, "file_only", False))
+    handlers: list[logging.Handler] = [console]
+    file_handler = None
+    if logfile is not None:
+        file_handler = logging.FileHandler(logfile, mode="w", encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+    package = logging.getLogger("j1x0_cardprinter")
+    package.handlers[:] = handlers
+    package.setLevel(logging.DEBUG if logfile is not None else level)
+    package.propagate = False
+    return file_handler
+
+
+def _progress():
+    """A progress callback that prints a line per 10% (used when not logging the protocol)."""
+    last = [-1]
+
+    def show(sent: int, total: int) -> None:
+        percent = sent * 10 // total * 10
+        if percent != last[0]:
+            last[0] = percent
+            print(f"  {percent:3d}%  ({sent // 1024} of {total // 1024} KB)", flush=True)
+
+    return show
 
 
 def _send_file(path: Path | None, args: argparse.Namespace) -> int:
@@ -94,23 +145,73 @@ def _send_file(path: Path | None, args: argparse.Namespace) -> int:
             raise SystemExit(f"{path} is empty")
         if not data.startswith(JOB_PREFIX):
             print(f"warning: {path} does not start with ESC MASTER; sending anyway", file=sys.stderr)
+    report = None
+    watch = False
+    if args.verbose or args.log:                          # see where a hang is, if there is one
+        stream = args._log_handler.stream if args._log_handler else sys.stderr
+        try:
+            faulthandler.dump_traceback_later(HANG_DUMP_SECONDS, repeat=True, file=stream)
+            watch = True
+        except (AttributeError, ValueError, OSError):     # a stream with no file descriptor
+            log.debug("no hang dump: the log stream has no file descriptor")
     try:
         with J1x0USB.discover(args.vid, args.pid, soft_reset=args.soft_reset) as link:
             if not args.no_check:
                 report = check_link(link)
-                print("\n".join(report.lines()))
+                print("\n".join(report.lines()), flush=True)
+                for line in report.lines():
+                    log.info("check  %s", line)
                 if not report.ready and not (args.force and path is not None):
                     if path is not None:
                         print("not sending; fix the problem above or use --force", file=sys.stderr)
                     return 1
             if path is None:
                 return 0
-            sent = link.write(data)
-    except (RuntimeError, usb.core.USBError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+            if args.raw:
+                sent = link.write(data)
+                summary = f"sent {sent} bytes from {path} (raw: no pacing, no end-of-card commands)"
+            else:
+                result = send_job(link, data, end=not args.no_end, chunk=args.chunk,
+                                  progress=None if args.verbose else _progress())
+                summary = (f"sent {result.bytes_sent} bytes from {path} in {result.chunks} chunks "
+                           f"({result.seconds:.1f} s)")
+                if not args.no_end:
+                    _watch_printer(link)
+    except (RuntimeError, usb.core.USBError) as exc:              # includes PrinterError
+        print(f"error: {exc}", file=sys.stderr, flush=True)
+        log.error("error: %s", exc, extra={"file_only": True})      # the console already has it
         return 1
-    print(f"sent {sent} bytes from {path}")
+    except KeyboardInterrupt:
+        print("interrupted: the printer may be left part-way through a job and need a power cycle",
+              file=sys.stderr)
+        return 130
+    finally:
+        if watch:
+            faulthandler.cancel_dump_traceback_later()
+    print(summary)
     return 0
+
+
+AFTERMATH_POLLS = 8
+AFTERMATH_INTERVAL = 2.0
+
+
+def _watch_printer(link) -> None:
+    """After the job, ask the printer how it is for a few seconds and log what it says.
+
+    `ESC !NL` is the panels-printed counter: if it goes up from the pre-flight value the printer
+    treated the data as a complete card. Silence means it is still busy, or wedged.
+    """
+    for attempt in range(1, AFTERMATH_POLLS + 1):
+        try:
+            reply = link.query(cmd("!NL"), 1000)
+        except (RuntimeError, usb.core.USBError) as exc:
+            log.info("after the job: %s", exc)
+            return
+        text = show_bytes(reply) if reply else "no answer"
+        log.info("after the job (%d/%d): ESC !NL -> %s", attempt, AFTERMATH_POLLS, text)
+        print(f"printer after the job: {text}", flush=True)
+        time.sleep(AFTERMATH_INTERVAL)
 
 
 def _run_ui(args: argparse.Namespace) -> int:
@@ -133,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         argv = ["ui"]                                  # `j1x0` on its own opens the web UI
     parser = argparse.ArgumentParser(prog="j1x0", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="log the protocol (-vv: every USB transfer and acknowledgement)")
+    common = argparse.ArgumentParser(add_help=False)              # the same -v after the sub-command
+    common.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS,
+                        help="log the protocol (-vv: every USB transfer and acknowledgement)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def card_args(p: argparse.ArgumentParser) -> None:
@@ -144,8 +249,6 @@ def main(argv: list[str] | None = None) -> int:
 
     def render_args(p: argparse.ArgumentParser) -> None:
         card_args(p)
-        p.add_argument("--flip-lines", action="store_true")
-        p.add_argument("--flip-dots", action="store_true")
         p.add_argument("--seed", type=int, default=None,
                        help="seed the dither so repeated renders are byte-identical")
 
@@ -159,8 +262,17 @@ def main(argv: list[str] | None = None) -> int:
                        help="send even if the check says the printer is not ready")
         p.add_argument("--soft-reset", action="store_true",
                        help="send a USB printer-class SOFT_RESET after opening (may abort a job)")
+        p.add_argument("--raw", action="store_true",
+                       help="write the file as it is: no pacing, no acknowledgements, no end-of-card commands")
+        p.add_argument("--no-end", action="store_true",
+                       help="do not add the end-of-card commands (for data that already has them)")
+        p.add_argument("--chunk", type=int, default=None, metavar="BYTES",
+                       help="bytes per chunk (default 4096, what the Windows monitor uses)")
+        p.add_argument("--log", type=Path, default=None, metavar="FILE",
+                       help="also write a full-detail log to FILE (flushed line by line; includes a stack "
+                            "dump if a USB call hangs)")
 
-    p = sub.add_parser("ui", help="open the web UI (this is what plain `j1x0` does)")
+    p = sub.add_parser("ui", parents=[common], help="open the web UI (this is what plain `j1x0` does)")
     usb_args_ui = p.add_argument_group("printer")
     usb_args_ui.add_argument("--vid", type=lambda s: int(s, 0), default=None)
     usb_args_ui.add_argument("--pid", type=lambda s: int(s, 0), default=None)
@@ -173,23 +285,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8730)
     p.add_argument("--no-browser", action="store_true", help="do not open a browser window")
 
-    p = sub.add_parser("fields", help="list $token$ fields and layers in a template")
+    p = sub.add_parser("fields", parents=[common], help="list $token$ fields and layers in a template")
     p.add_argument("template", type=Path)
 
-    p = sub.add_parser("preview", help="write the colour and K renders as PNGs")
+    p = sub.add_parser("preview", parents=[common], help="write the colour and K renders as PNGs")
     card_args(p)
     p.add_argument("-o", "--out", type=Path, default=Path("."))
 
-    p = sub.add_parser("render", aliases=["build"], help="write the printer job to a file (no printer needed)")
+    p = sub.add_parser("render", parents=[common], aliases=["build"], help="write the printer job to a file (no printer needed)")
     render_args(p)
     p.add_argument("-o", "--out", type=Path, required=True)
 
-    p = sub.add_parser("send", help="check the printer, then send a job file (no Inkscape needed)")
+    p = sub.add_parser("send", parents=[common], help="check the printer, then send a job file (no Inkscape needed)")
     p.add_argument("job", type=Path, nargs="?", default=None,
                    help="job file from `render`; omit to only check the link and exit")
     usb_args(p)
 
-    p = sub.add_parser("print", help="render a card and send it (render + send)")
+    p = sub.add_parser("print", parents=[common], help="render a card and send it (render + send)")
     render_args(p)
     usb_args(p)
     p.add_argument("-o", "--save", type=Path, default=None,
@@ -198,8 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "build":
         args.command = "render"
-    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
-                        format="%(levelname)s %(name)s: %(message)s")
+    args._log_handler = _setup_logging(args.verbose, getattr(args, "log", None))
 
     if args.command == "ui":
         return _run_ui(args)

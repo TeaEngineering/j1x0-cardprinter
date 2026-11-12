@@ -2,69 +2,29 @@ import numpy as np
 import pytest
 
 from j1x0_cardprinter.encode import (
-    DOTS, LINES, Orientation, colour_planes, pack_mono, prepare_colour, quantise16, rle_plane,
+    DOTS, LINE_BYTES, LINES, colour_planes, pack_mono, pack_plane, prepare_colour, quantise16, stream_order,
+    unpack_plane,
 )
 
 
-def reference_rle(samples):
-    """Direct port of the driver's state machine (RlePlane_Portrait)."""
-    out, state, val, cnt = bytearray(), 0, 0, 0
-    for v in samples:
-        if state == 0:
-            val, cnt, state = v, 0, 1
-        elif state == 1:
-            if v == val:
-                cnt, state = 2, 2
-            else:
-                out.append(val)
-                val = v
-        elif v != val:
-            out += bytes((0x80 + cnt, val))
-            val, state = v, 1
-        else:
-            cnt += 1
-            if cnt == 127:
-                out += bytes((0xFF, val))
-                state = 0
-    if state == 1:
-        out.append(val)
-    elif state == 2:
-        out += bytes((0x80 + cnt, val))
-    return bytes(out)
+def test_pack_plane_layout_for_a_blank_line():
+    line = pack_plane(np.full((1, DOTS), 1, np.uint8))
+    assert len(line) == LINE_BYTES == 432
+    assert line == b"\x04\x21" * 213 + b"\x04\x00" + b"\x00" * 4     # 213 full words, 1 lone sample, 4 zero bytes
 
 
-def decode_rle(data):
-    out, i = [], 0
-    while i < len(data):
-        b = data[i]
-        if b < 0x80:
-            out.append(b)
-            i += 1
-        else:
-            out += [data[i + 1]] * (b - 0x80)
-            i += 2
-    return out
+def test_pack_plane_field_order_is_msb_first():
+    samples = np.zeros((1, DOTS), np.uint8)
+    samples[0, :3] = (31, 17, 3)
+    assert pack_plane(samples)[:2] == ((31 << 10) | (17 << 5) | 3).to_bytes(2, "big")
 
 
-def test_rle_known_values():
-    assert rle_plane(np.array([5, 5, 5, 7])) == bytes((0x83, 5, 7))
-    assert rle_plane(np.array([1])) == bytes((1,))
-    assert rle_plane(np.array([3] * 127)) == bytes((0xFF, 3))
-    assert rle_plane(np.array([3] * 128)) == bytes((0xFF, 3, 3))
-    assert rle_plane(np.array([3] * 130)) == bytes((0xFF, 3, 0x83, 3))
-    assert rle_plane(np.array([], dtype=np.uint8)) == b""
-
-
-@pytest.mark.parametrize("seed", range(5))
-def test_rle_matches_driver_state_machine_and_roundtrips(seed):
-    rng = np.random.default_rng(seed)
-    # Mix of long runs and noise, values like the real planes (odd, 1..31).
-    runs = [np.full(int(n), int(v), np.uint8)
-            for n, v in zip(rng.integers(1, 400, 200), rng.choice(range(1, 32, 2), 200))]
-    samples = np.concatenate(runs)
-    encoded = rle_plane(samples)
-    assert encoded == reference_rle(samples.tolist())
-    assert decode_rle(encoded) == samples.tolist()
+@pytest.mark.parametrize("seed", range(3))
+def test_pack_plane_roundtrips(seed):
+    samples = np.random.default_rng(seed).integers(0, 32, (LINES, DOTS)).astype(np.uint8)
+    packed = pack_plane(samples)
+    assert len(packed) == LINES * LINE_BYTES == 442368
+    assert (unpack_plane(packed) == samples).all()
 
 
 def test_white_page_encodes_to_value_one():
@@ -92,7 +52,7 @@ def test_quantise_levels_are_multiples_of_16():
 def test_pack_mono_shape_and_bit_order():
     mask = np.zeros((DOTS, LINES), bool)
     mask[0, 0] = True                       # dot 0 of line 0 -> MSB of byte 0
-    data = pack_mono(mask, Orientation())
+    data = pack_mono(mask)
     assert len(data) == LINES * 80
     assert data[0] == 0x80 and not any(data[1:])
 
@@ -101,15 +61,15 @@ def test_pack_mono_stuffs_0x5b():
     mask = np.zeros((DOTS, LINES), bool)
     for dot in (1, 3, 4, 6, 7):             # 0b01011011 = 0x5B
         mask[dot, 0] = True
-    data = pack_mono(mask, Orientation())
+    data = pack_mono(mask)
     assert data[:2] == b"\x5b\x5b" and len(data) == LINES * 80 + 1
 
 
-def test_orientation_flags():
+def test_stream_order_line_i_is_image_column_i():
+    # Proven from a captured job: decoding it gives an upright card with this mapping (docs/captured-job.md).
     img = np.arange(DOTS * LINES).reshape(DOTS, LINES)
-    base = Orientation().apply(img)
-    assert base[0, 0] == img[0, 0] and base[1, 0] == img[0, 1]
-    both = Orientation(flip_lines=True, flip_dots=True).apply(img)
-    assert (both == base[::-1, ::-1]).all()
+    lines = stream_order(img)
+    assert lines.shape == (LINES, DOTS)
+    assert lines[0, 0] == img[0, 0] and lines[0, 1] == img[1, 0] and lines[1, 0] == img[0, 1]
     with pytest.raises(ValueError):
-        Orientation().apply(np.zeros((3, 3)))
+        stream_order(np.zeros((3, 3)))
