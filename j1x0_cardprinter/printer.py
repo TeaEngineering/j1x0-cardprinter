@@ -8,7 +8,7 @@ import numpy as np
 
 from .encode import Orientation, colour_planes, encode_plane, pack_mono, prepare_colour
 from .protocol import JobOptions, build_job
-from .raster import InkscapeRasteriser, Rasteriser, render_card
+from .raster import CardRaster, InkscapeRasteriser, Rasteriser, render_card
 from .template import Template
 from .usb import J1x0Link
 
@@ -26,15 +26,18 @@ class Printer:
         self.orientation = orientation
         self._rng = np.random.default_rng(seed)
 
-    def build(
-        self, template: Template, values: Mapping[str, object], options: JobOptions | None = None
-    ) -> bytes:
-        """Render the card and return the complete job byte stream (no hardware needed)."""
-        card = render_card(template, values, self.rasteriser)
+    def encode(self, card: CardRaster, options: JobOptions | None = None) -> bytes:
+        """Turn an already-rendered card into the complete job byte stream."""
         prepared = prepare_colour(np.asarray(card.colour), rng=self._rng)
         planes = [encode_plane(p, self.orientation) for p in colour_planes(prepared)]
         k_payload = pack_mono(card.k_mask, self.orientation) if card.k_mask is not None else None
         return build_job(planes, k_payload, options)
+
+    def build(
+        self, template: Template, values: Mapping[str, object], options: JobOptions | None = None
+    ) -> bytes:
+        """Render the card and return the complete job byte stream (no hardware needed)."""
+        return self.encode(render_card(template, values, self.rasteriser), options)
 
     def print_card(
         self, template: Template, values: Mapping[str, object], options: JobOptions | None = None

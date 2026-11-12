@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card printer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Card printer</h1>
+    <div class="status-wrap">
+      <span id="status" class="chip chip-unknown" role="status" aria-live="polite">Checking the printer…</span>
+      <button id="status-refresh" class="link" type="button">Check again</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <div class="left">
+      <section>
+        <h2><span class="step">1</span> Choose a design</h2>
+        <div id="designs" class="designs"></div>
+        <div id="no-designs" class="notice" hidden>
+          <p><strong>No card designs found.</strong></p>
+          <p>Save your card designs (Inkscape <code>.svg</code> files) in this folder:</p>
+          <p><code id="designs-dir"></code></p>
+          <button id="reload" type="button">Look again</button>
+        </div>
+      </section>
+
+      <section id="fill" hidden>
+        <h2><span class="step">2</span> Fill in the details</h2>
+        <form id="form" autocomplete="off"></form>
+      </section>
+    </div>
+
+    <div class="right">
+      <section id="print-panel" hidden>
+        <h2><span class="step">3</span> Check and print</h2>
+        <div class="card-frame">
+          <img id="preview" alt="Preview of the card">
+          <div id="preview-overlay" class="overlay">Drawing the card…</div>
+        </div>
+        <p id="warnings" class="warn" hidden></p>
+        <button id="print" class="primary" type="button" disabled>Print card</button>
+        <p id="print-note" class="note" aria-live="polite"></p>
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <label class="check"><input type="checkbox" id="flip-lines"> Mirror left to right</label>
+          <label class="check"><input type="checkbox" id="flip-dots"> Mirror top to bottom</label>
+          <label class="check"><input type="checkbox" id="force"> Print even if the printer reports a problem</label>
+          <button id="details" class="link" type="button">Show printer details</button>
+          <pre id="details-out" hidden></pre>
+        </details>
+      </section>
+    </div>
+  </main>
+
+  <script>window.J1X0_TOKEN = "__TOKEN__";</script>
+  <script src="/app.js"></script>
+</body>
+</html>

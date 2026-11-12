@@ -1,5 +1,6 @@
-"""Command line: list fields, preview, render a job file, send it, or do both with `print`.
+"""Command line and web UI for the card printer.
 
+    j1x0                                         # open the web UI (designs from ~/.j1x0/*.svg)
     j1x0 fields  card.svg
     j1x0 preview card.svg -s firstName=Ada -s lastName=Lovelace -o out/
     j1x0 render  card.svg -s firstName=Ada -s lastName=Lovelace -o job.bin   # no printer needed
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -29,9 +31,10 @@ import usb.core
 from PIL import Image
 
 from .encode import Orientation
+from .library import default_dir
 from .printer import Printer
 from .probe import check_link
-from .raster import InkscapeRasteriser, render_card
+from .raster import RENDERERS, make_rasteriser, render_card
 from .template import Template
 from .usb import J1x0USB
 
@@ -59,10 +62,20 @@ def _load_card(args: argparse.Namespace) -> tuple[Template, dict[str, str]]:
     return template, values
 
 
+def _rasteriser(args: argparse.Namespace, template: Template):
+    """The chosen renderer; warns when cairosvg is chosen for a design it cannot draw properly."""
+    if args.renderer == "cairosvg":
+        problems = template.cairosvg_problems()
+        if problems:
+            print("warning: cairosvg cannot draw: " + ", ".join(problems)
+                  + " (use --renderer inkscape for a faithful render)", file=sys.stderr)
+    return make_rasteriser(args.renderer)
+
+
 def _render_job(args: argparse.Namespace) -> bytes:
     template, values = _load_card(args)
     printer = Printer(
-        rasteriser=InkscapeRasteriser(),
+        rasteriser=_rasteriser(args, template),
         orientation=Orientation(flip_lines=args.flip_lines, flip_dots=args.flip_dots),
         seed=args.seed,
     )
@@ -100,7 +113,24 @@ def _send_file(path: Path | None, args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_ui(args: argparse.Namespace) -> int:
+    from .webui import CardApp, serve                  # imported late: the CLI needs no web code
+
+    if args.renderer.startswith("inkscape") and shutil.which("inkscape") is None:
+        print("warning: Inkscape was not found on the PATH, so cards cannot be drawn.\n"
+              "         Install it from https://inkscape.org, or use --renderer cairosvg.",
+              file=sys.stderr)
+    designs = Path(args.templates).expanduser() if args.templates else default_dir()
+    app = CardApp(designs, rasteriser=make_rasteriser(args.renderer),
+                  link_factory=lambda: J1x0USB.discover(args.vid, args.pid))
+    serve(app, host=args.host, port=args.port, open_browser=not args.no_browser)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        argv = ["ui"]                                  # `j1x0` on its own opens the web UI
     parser = argparse.ArgumentParser(prog="j1x0", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -109,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     def card_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("template", type=Path)
         p.add_argument("-s", "--set", action="append", default=[], metavar="NAME=VALUE")
+        p.add_argument("--renderer", choices=("inkscape", "cairosvg"), default="inkscape",
+                       help="SVG renderer (default: inkscape, which is the faithful one)")
 
     def render_args(p: argparse.ArgumentParser) -> None:
         card_args(p)
@@ -127,6 +159,19 @@ def main(argv: list[str] | None = None) -> int:
                        help="send even if the check says the printer is not ready")
         p.add_argument("--soft-reset", action="store_true",
                        help="send a USB printer-class SOFT_RESET after opening (may abort a job)")
+
+    p = sub.add_parser("ui", help="open the web UI (this is what plain `j1x0` does)")
+    usb_args_ui = p.add_argument_group("printer")
+    usb_args_ui.add_argument("--vid", type=lambda s: int(s, 0), default=None)
+    usb_args_ui.add_argument("--pid", type=lambda s: int(s, 0), default=None)
+    p.add_argument("--templates", metavar="DIR", default=None,
+                   help="folder of .svg card designs (default: $J1X0_TEMPLATES or ~/.j1x0)")
+    p.add_argument("--renderer", choices=RENDERERS, default="inkscape-shell",
+                   help="SVG renderer (default: inkscape-shell, a persistent Inkscape)")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="address to listen on (default: this computer only)")
+    p.add_argument("--port", type=int, default=8730)
+    p.add_argument("--no-browser", action="store_true", help="do not open a browser window")
 
     p = sub.add_parser("fields", help="list $token$ fields and layers in a template")
     p.add_argument("template", type=Path)
@@ -156,6 +201,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
 
+    if args.command == "ui":
+        return _run_ui(args)
+
     if args.command == "send":
         return _send_file(args.job, args)
 
@@ -167,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "preview":
         template, values = _load_card(args)
-        card = render_card(template, values, InkscapeRasteriser())
+        card = render_card(template, values, _rasteriser(args, template))
         args.out.mkdir(parents=True, exist_ok=True)
         card.colour.save(args.out / "colour.png")
         if card.k_mask is not None:

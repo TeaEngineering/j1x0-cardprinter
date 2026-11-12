@@ -33,6 +33,8 @@ _TEXT_BLOCKS = {f"{{{SVG}}}text", f"{{{SVG}}}flowRoot"}
 _HREF = {f"{{{XLINK}}}href", "href"}
 _LAYER_MODE = f"{{{INKSCAPE}}}groupmode"
 _LAYER_LABEL = f"{{{INKSCAPE}}}label"
+# Root children that draw nothing; they must stay visible (gradients, styles, ...) when hiding the rest.
+_NON_GRAPHIC = {"defs", "metadata", "namedview", "style", "title", "desc", "script"}
 
 
 class MissingField(KeyError):
@@ -75,6 +77,54 @@ class Template:
     def layer_names(self) -> list[str]:
         return [g.get(_LAYER_LABEL, "") for g in self._layers(self._root)]
 
+    def image_fields(self) -> list[str]:
+        """Fields used in an `href` (a photo or logo): the value is a path to an image file."""
+        names: dict[str, None] = {}
+        for elem in self._root.iter():
+            for key, value in elem.attrib.items():
+                if key in _HREF:
+                    for name in TOKEN.findall(value):
+                        names.setdefault(name)
+        return list(names)
+
+    def cairosvg_problems(self) -> list[str]:
+        """SVG features in this design that cairosvg ignores or draws wrongly.
+
+        Found by comparing it with Inkscape (docs/rendering.md). An empty list means the design
+        only uses features both renderers handle, not that the output is pixel-identical.
+        """
+        found: set[str] = set()
+        by_tag = {"filter": "filters (blur, drop shadow)", "mask": "masks",
+                  "pattern": "pattern fills", "flowRoot": "flowed text (flowRoot)"}
+        by_property = {
+            "filter": "filters (blur, drop shadow)", "mask": "masks",
+            "shape-inside": "wrapped text boxes", "mix-blend-mode": "blend modes",
+            "word-spacing": "word spacing", "font-variant": "small caps",
+        }
+        for elem in self._root.iter():
+            tag = elem.tag.rsplit("}", 1)[-1]
+            if tag in by_tag:
+                found.add(by_tag[tag])
+            props = dict(elem.attrib)
+            for declaration in elem.get("style", "").split(";"):
+                name, sep, value = declaration.partition(":")
+                if sep:
+                    props[name.strip()] = value.strip()
+            for name, label in by_property.items():
+                value = props.get(name)
+                if value is None or value in ("none", "normal", "inherit"):
+                    continue
+                if name == "font-variant" and value != "small-caps":
+                    continue
+                found.add(label)
+            if props.get("text-decoration", "none") not in ("none", "inherit"):
+                found.add("underline / strikethrough")
+            if props.get("font-style", "normal") in ("italic", "oblique"):
+                found.add("italic text")
+            if "textLength" in props:
+                found.add("textLength")
+        return sorted(found)
+
     # ── Rendering ────────────────────────────────────────────────────────────
 
     def render(
@@ -86,7 +136,9 @@ class Template:
     ) -> bytes:
         """Return the SVG with tokens substituted.
 
-        `only_layers` hides every layer not listed; `hide_layers` hides the named ones.
+        `only_layers` shows only the listed layers: every other layer is hidden, and so is any
+        loose object outside all layers (it belongs to the colour artwork). `hide_layers` hides
+        the named layers.
         """
         root = copy.deepcopy(self._root)
         for elem in root.iter():
@@ -104,8 +156,13 @@ class Template:
         for layer in self._layers(root):
             label = layer.get(_LAYER_LABEL, "")
             if (only is not None and label not in only) or label in hide:
-                style = layer.get("style", "")
-                layer.set("style", f"{style};display:none" if style else "display:none")
+                self._hide(layer)
+        if only is not None:
+            for child in root:
+                if child.tag.rsplit("}", 1)[-1] in _NON_GRAPHIC:
+                    continue
+                if not any(g.get(_LAYER_LABEL, "") in only for g in self._layers(child)):
+                    self._hide(child)
 
         if self.base_dir is not None:
             root.set(f"{{{SODIPODI}}}docbase", str(self.base_dir))
@@ -116,6 +173,12 @@ class Template:
     @staticmethod
     def _layers(root: ET.Element) -> list[ET.Element]:
         return [g for g in root.iter(f"{{{SVG}}}g") if g.get(_LAYER_MODE) == "layer"]
+
+    @staticmethod
+    def _hide(elem: ET.Element) -> None:
+        style = elem.get("style", "")
+        if "display:none" not in style:
+            elem.set("style", f"{style};display:none" if style else "display:none")
 
     @staticmethod
     def _text_slots(block: ET.Element) -> list[tuple[ET.Element, str]]:

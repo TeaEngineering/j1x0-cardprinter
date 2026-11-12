@@ -122,9 +122,13 @@ def _ask(link: J1x0Link, command: bytes, timeout: int) -> Reply:
         return Reply(ok=False, message=str(exc))
 
 
-def check_link(link: J1x0Link, timeout: int = 2000) -> LinkReport:
+def check_link(link: J1x0Link, timeout: int = 2000, details: bool = True) -> LinkReport:
     """Read status and identity from an open link. Never raises for a printer that is merely
-    unresponsive; those become `problems`."""
+    unresponsive; those become `problems`.
+
+    `details=False` skips the informational Device Information queries, so a silent printer costs
+    three timeouts instead of seven (used as the gate before printing).
+    """
     report = LinkReport(info=link.info)
 
     try:
@@ -152,6 +156,9 @@ def check_link(link: J1x0Link, timeout: int = 2000) -> LinkReport:
         left = report.remaining.number
         if left is not None and left in LOW_RIBBON:
             report.warnings.append(f"ribbon is running low ({left} left)")
+
+    if not details:
+        return report
 
     # Informational fields (the rest of the Windows Device Information dialog).
     report.serial = _ask(link, CMD_SERIAL, timeout)

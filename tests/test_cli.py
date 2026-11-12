@@ -24,7 +24,7 @@ class FakeRasteriser:
 @pytest.fixture
 def fakes(monkeypatch):
     link = J1x0MockUSB()
-    monkeypatch.setattr(cli, "InkscapeRasteriser", FakeRasteriser)
+    monkeypatch.setattr(cli, "make_rasteriser", lambda name: FakeRasteriser())
     monkeypatch.setattr(cli.J1x0USB, "discover",
                         classmethod(lambda cls, vid=None, pid=None, timeout=5000, soft_reset=False: link))
     return link

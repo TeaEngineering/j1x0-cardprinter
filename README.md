@@ -30,16 +30,53 @@ Install
 
     $ pip install j1x0-cardprinter
 
-You also need an SVG rasteriser. The default is the [Inkscape](https://inkscape.org) command
-line (`inkscape` on your `PATH`). To use [CairoSVG](https://cairosvg.org) instead:
+You also need [Inkscape](https://inkscape.org) (the `inkscape` command on your `PATH`) to draw
+the cards. It is the editor the designs are made in, and it renders them faithfully; see
+[docs/rendering.md](docs/rendering.md) for why it is the default and not the faster
+[CairoSVG](https://cairosvg.org), which silently drops filters, masks, wrapped text and more.
+CairoSVG is available with `--renderer cairosvg` if you install it:
 
     $ pip install "j1x0-cardprinter[svg]"
 
 On macOS and Linux `pyusb` needs the libusb library (`brew install libusb`, or your
 distribution's `libusb-1.0` package).
 
-Quick start
------------
+Web UI
+------
+
+    $ j1x0
+
+![The web UI: choose a design, fill in the details, check the preview and print](docs/images/web-ui.png)
+
+With no arguments `j1x0` starts a small web page on your own computer and opens it in your
+browser. It is meant for someone who just needs to print cards:
+
+1. **Choose a design.** Every `.svg` file in `~/.j1x0/` is offered, with a thumbnail. Save your
+   Inkscape designs there (or set `J1X0_TEMPLATES`, or start with `j1x0 ui --templates DIR`).
+2. **Fill in the details.** One box per `$field$` in the design, named from the field
+   (`firstName` becomes "First name"). A field used as an image link (`xlink:href="$photo$"`)
+   becomes a file picker; phone photos are rotated and shrunk automatically.
+3. **Check and print.** The card is redrawn as you type, so the preview is always what will be
+   printed. The status badge at the top shows whether the printer is found and ready, and the
+   **Print card** button is only enabled when it is. The card sent to the printer is exactly the
+   one in the preview.
+
+The **Advanced** section has the two image-mirroring switches (for the first test card, see
+[Orientation](#orientation)), a way to print even when the printer reports a problem, and a button
+that shows the full printer details. With no printer connected you can still choose, fill in and
+preview cards.
+
+`j1x0 ui` takes `--port` (default 8730), `--no-browser`, `--templates DIR`, `--vid/--pid` and
+`--renderer`. The page is only reachable from this computer. `--host 0.0.0.0` makes it reachable
+from others (for example a Raspberry Pi next to the printer), but it then has no login, so
+anyone on the network can print.
+
+A design is one Inkscape file with two kinds of layers: the colour artwork, and a layer named `K`
+for black resin (text and barcodes). Objects outside every layer count as colour artwork.
+[`examples/`](examples/) has two to start from.
+
+Command line
+------------
 
     $ j1x0 fields examples/card.svg
     fields: firstName, lastName, cardNo
@@ -53,6 +90,7 @@ Quick start
 
 | Command | Needs | What it does |
 |---|---|---|
+| `ui` | Inkscape | The web UI above. Plain `j1x0` does this. |
 | `fields` | | List the `$token$` fields and layer names in a template. |
 | `preview` | Inkscape | Write `colour.png` and `k.png` so you can check the two renders. |
 | `render` | Inkscape | Render a card to a printer job file. No printer needed. (`build` is an alias.) |
@@ -189,7 +227,8 @@ Documentation
 The print protocol is documented in [docs/](docs/), starting with
 [docs/protocol.md](docs/protocol.md). Each statement there is marked as read from the
 decompiled code, inferred, or guessed, and [docs/open-questions.md](docs/open-questions.md)
-lists what needs checking on hardware.
+lists what needs checking on hardware. [docs/rendering.md](docs/rendering.md) has the Inkscape
+versus CairoSVG benchmark behind the choice of renderer.
 
 Development
 -----------
