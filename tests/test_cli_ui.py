@@ -48,16 +48,33 @@ def test_ui_honours_the_templates_environment_variable(served, monkeypatch, tmp_
     assert served["app"].designs_dir == tmp_path / "cards"
 
 
-def test_ui_warns_when_inkscape_is_missing(served, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
-    cli.main(["ui", "--no-browser"])
+def test_ui_warns_when_a_chosen_inkscape_is_missing(served, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "find_inkscape", lambda: None)
+    cli.main(["ui", "--no-browser", "--renderer", "inkscape-shell"])
     assert "Inkscape was not found" in capsys.readouterr().err
 
 
 def test_ui_does_not_warn_about_inkscape_for_cairosvg(served, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    monkeypatch.setattr(cli, "find_inkscape", lambda: None)
     cli.main(["ui", "--no-browser", "--renderer", "cairosvg"])
     assert capsys.readouterr().err == ""
+
+
+def test_ui_defaults_to_auto_and_falls_back_to_cairosvg_without_complaint(served, monkeypatch, capsys):
+    from j1x0_cardprinter import raster
+    monkeypatch.setattr(raster, "find_inkscape", lambda: None)
+    monkeypatch.setattr(raster, "_have_cairosvg", lambda: True)
+    cli.main(["ui", "--no-browser"])
+    assert type(served["app"].rasteriser).__name__ == "CairoRasteriser"
+    assert capsys.readouterr().err == ""
+
+
+def test_ui_with_no_renderer_at_all_says_what_to_install(served, monkeypatch, capsys):
+    from j1x0_cardprinter import raster
+    monkeypatch.setattr(raster, "find_inkscape", lambda: None)
+    monkeypatch.setattr(raster, "_have_cairosvg", lambda: False)
+    assert cli.main(["ui", "--no-browser"]) == 1
+    assert "Inkscape" in capsys.readouterr().err
 
 
 def test_choosing_cairosvg_warns_about_unsupported_features(monkeypatch, tmp_path, capsys):

@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import logging
-import shutil
 import sys
 import tempfile
 import time
@@ -40,7 +39,7 @@ from PIL import ImageOps
 from .library import default_dir
 from .printer import Printer
 from .probe import check_link
-from .raster import RENDERERS, composite, make_rasteriser, render_card
+from .raster import RENDERERS, composite, find_inkscape, make_rasteriser, render_card
 from .sender import PrinterError, send_job
 from .protocol import cmd
 from .status import show_bytes
@@ -217,12 +216,17 @@ def _watch_printer(link) -> None:
 def _run_ui(args: argparse.Namespace) -> int:
     from .webui import CardApp, serve                  # imported late: the CLI needs no web code
 
-    if args.renderer.startswith("inkscape") and shutil.which("inkscape") is None:
-        print("warning: Inkscape was not found on the PATH, so cards cannot be drawn.\n"
+    if args.renderer.startswith("inkscape") and find_inkscape() is None:
+        print("warning: Inkscape was not found, so cards cannot be drawn.\n"
               "         Install it from https://inkscape.org, or use --renderer cairosvg.",
               file=sys.stderr)
+    try:
+        rasteriser = make_rasteriser(args.renderer)
+    except RuntimeError as exc:                        # --renderer auto with nothing to draw with
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     designs = Path(args.templates).expanduser() if args.templates else default_dir()
-    app = CardApp(designs, rasteriser=make_rasteriser(args.renderer),
+    app = CardApp(designs, rasteriser=rasteriser,
                   link_factory=lambda: J1x0USB.discover(args.vid, args.pid))
     serve(app, host=args.host, port=args.port, open_browser=not args.no_browser)
     return 0
@@ -281,8 +285,9 @@ def main(argv: list[str] | None = None) -> int:
     usb_args_ui.add_argument("--pid", type=lambda s: int(s, 0), default=None)
     p.add_argument("--templates", metavar="DIR", default=None,
                    help="folder of .svg card designs (default: $J1X0_TEMPLATES or ~/.j1x0)")
-    p.add_argument("--renderer", choices=RENDERERS, default="inkscape-shell",
-                   help="SVG renderer (default: inkscape-shell, a persistent Inkscape)")
+    p.add_argument("--renderer", choices=RENDERERS, default="auto",
+                   help="SVG renderer (default: auto, a persistent Inkscape if it is installed, otherwise "
+                        "cairosvg, which cannot draw every SVG feature)")
     p.add_argument("--host", default="127.0.0.1",
                    help="address to listen on (default: this computer only)")
     p.add_argument("--port", type=int, default=8730)

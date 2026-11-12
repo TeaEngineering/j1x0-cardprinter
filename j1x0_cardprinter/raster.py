@@ -14,12 +14,15 @@ Rasterisers (docs/rendering.md has the benchmark behind this choice):
                                identical to the above. Used by the web UI.
   * `CairoRasteriser`          cairosvg (~0.015 s) but it silently ignores filters, masks, blend
                                modes, wrapped text boxes and more. Optional, with a warning.
+
+`make_rasteriser("auto")` picks Inkscape when it is installed (`find_inkscape`) and cairosvg otherwise.
 """
 
 from __future__ import annotations
 
 import atexit
 import io
+import os
 import queue
 import shutil
 import subprocess
@@ -41,11 +44,33 @@ class Rasteriser(Protocol):
     def render(self, svg: bytes, width: int, height: int) -> Image.Image: ...
 
 
+# Where Inkscape lives when it is not on the PATH: the download from inkscape.org, and Homebrew. An app
+# started from the Finder has no useful PATH, so these matter there.
+INKSCAPE_LOCATIONS = (
+    "/Applications/Inkscape.app/Contents/MacOS/inkscape",
+    "~/Applications/Inkscape.app/Contents/MacOS/inkscape",
+    "/opt/homebrew/bin/inkscape",
+    "/usr/local/bin/inkscape",
+)
+
+
+def find_inkscape() -> str | None:
+    """The Inkscape command: on the PATH, or in one of `INKSCAPE_LOCATIONS`; None if it is not installed."""
+    found = shutil.which("inkscape")
+    if found:
+        return found
+    for location in INKSCAPE_LOCATIONS:
+        path = Path(location).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
 class InkscapeRasteriser:
     """Rasterise with the Inkscape command line. Renders on an opaque white background."""
 
-    def __init__(self, binary: str = "inkscape") -> None:
-        self.binary = binary
+    def __init__(self, binary: str | None = None) -> None:
+        self.binary = binary or find_inkscape() or "inkscape"
 
     def render(self, svg: bytes, width: int, height: int) -> Image.Image:
         with tempfile.TemporaryDirectory(prefix="j1x0-") as tmp:
@@ -80,8 +105,8 @@ class InkscapeShellRasteriser:
 
     TIMEOUT = 60.0
 
-    def __init__(self, binary: str = "inkscape") -> None:
-        self.binary = binary
+    def __init__(self, binary: str | None = None) -> None:
+        self.binary = binary or find_inkscape() or "inkscape"
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._chunks: queue.Queue[bytes | None] = queue.Queue()
@@ -199,10 +224,26 @@ class CairoRasteriser:
         return Image.open(io.BytesIO(png)).convert("RGB")
 
 
-RENDERERS = ("inkscape", "inkscape-shell", "cairosvg")
+RENDERERS = ("inkscape", "inkscape-shell", "cairosvg", "auto")
+
+
+def _have_cairosvg() -> bool:
+    """True if cairosvg and the cairo library behind it can be loaded."""
+    try:
+        import cairosvg  # noqa: F401
+    except (ImportError, OSError):
+        return False
+    return True
 
 
 def make_rasteriser(name: str = "inkscape") -> Rasteriser:
+    if name == "auto":                      # Inkscape if it is installed, else cairosvg (with its limits)
+        if find_inkscape():
+            return InkscapeShellRasteriser()
+        if _have_cairosvg():
+            return CairoRasteriser()
+        raise RuntimeError("no SVG renderer is available: install Inkscape (https://inkscape.org), "
+                           "or `pip install j1x0-cardprinter[svg]`")
     if name == "inkscape":
         return InkscapeRasteriser()
     if name == "inkscape-shell":

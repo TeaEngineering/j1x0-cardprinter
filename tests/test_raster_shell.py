@@ -114,7 +114,7 @@ def test_concurrent_renders_are_serialised(shell):
 
 
 def test_make_rasteriser():
-    assert RENDERERS == ("inkscape", "inkscape-shell", "cairosvg")
+    assert RENDERERS == ("inkscape", "inkscape-shell", "cairosvg", "auto")
     assert type(make_rasteriser("inkscape-shell")).__name__ == "InkscapeShellRasteriser"
     assert type(make_rasteriser("cairosvg")).__name__ == "CairoRasteriser"
     with pytest.raises(ValueError):
