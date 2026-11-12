@@ -6,8 +6,8 @@ other fields of the Windows "Device Information" dialog (serial, head resistance
 encoder, panels printed, smart-card type). Nothing is printed and no job is started (no `MASTER`).
 
 Readiness depends on the first three queries, and on the status byte when the printer provides
-one. A J110i does not answer the USB status request at all, so a missing status byte is only a
-warning: the printer's own replies decide. The Device Information fields are informational and
+one. A printer that does not answer the USB status request is not penalised for it: the printer's
+own replies decide, and the `port status` line just says it is unavailable. The Device Information fields are informational and
 show as N/A when the printer does not answer.
 """
 
@@ -154,8 +154,6 @@ def check_link(link: J1x0Link, timeout: int = 2000, details: bool = True) -> Lin
         report.status = link.port_status()
     except Exception as exc:                        # usb.core.USBError and friends
         report.status_error = str(exc)
-        report.warnings.append("the printer does not answer the USB status request; "
-                               "readiness is judged from its replies instead")
     else:
         if not report.status.ok_to_open:
             report.problems.append("printer reports an error or is offline")

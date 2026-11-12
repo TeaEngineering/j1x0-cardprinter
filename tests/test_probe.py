@@ -133,8 +133,7 @@ class NoStatusByte(J1x0MockUSB):
 
 def test_a_printer_without_a_status_byte_is_judged_by_its_replies():
     report = check_link(NoStatusByte())
-    assert report.ready
-    assert any("does not answer the USB status request" in w for w in report.warnings)
+    assert report.ready and not report.warnings
     assert "port status:      unavailable (Operation timed out)" in "\n".join(report.lines())
 
 
