@@ -62,6 +62,10 @@ pattern = '!\[([^\]]*)\]\((?!https?://)([^)]+)\)'
 replacement = '![\1](https://raw.githubusercontent.com/TeaEngineering/j1x0-cardprinter/main/\2)'
 
 [[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '<img src="(?!https?://)([^"]+)"'
+replacement = '<img src="https://raw.githubusercontent.com/TeaEngineering/j1x0-cardprinter/main/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
 pattern = '(?<!!)\[([^\]]*)\]\((?!https?://|#|mailto:)([^)]+)\)'
 replacement = '[\1](https://github.com/TeaEngineering/j1x0-cardprinter/blob/main/\2)'
 

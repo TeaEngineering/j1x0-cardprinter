@@ -177,7 +177,7 @@ Start with [`examples/test-card.svg`](examples/test-card.svg). It has no fields:
     $ j1x0 send                                          # first, just check the link
     $ j1x0 send    test.bin
 
-![The test card as the web UI previews it: colour bars and edge bands, resin text and markers](docs/images/test-card.png)
+<img src="docs/images/test-card.png" width="50%" alt="The test card as the web UI previews it: colour bars and edge bands, resin text and markers">
 
 It is designed to answer the open questions about a new printer:
 
@@ -210,7 +210,7 @@ Writing a template
 See [`examples/card.svg`](examples/card.svg), rendered here with `firstName=Ada`, `lastName=Lovelace`
 and `cardNo=0042`:
 
-![examples/card.svg filled in as in the web UI preview](docs/images/card.png)
+<img src="docs/images/card.png" width="50%" alt="examples/card.svg filled in as in the web UI preview">
 
 Python API
 ----------
