@@ -18,7 +18,7 @@ How it works
 ------------
 
 ```
-card.svg + values  ->  render (Inkscape)  ->  Y/M/C planes + K bitmap  ->  ESC commands  ->  USB
+card.svg + values  ->  render (Inkscape)  ->  Y/M/C planes + K bitmap  ->  USB
 ```
 
 1. `$tokens$` in the SVG are replaced with your values.
