@@ -1,12 +1,11 @@
 [build-system]
-requires = ["hatchling>=1.21", "hatch-vcs>=0.4"]
+requires = ["hatchling>=1.21", "hatch-vcs>=0.4", "hatch-fancy-pypi-readme>=24.1"]
 build-backend = "hatchling.build"
 
 [project]
 name = "j1x0-cardprinter"
-dynamic = ["version"]
+dynamic = ["version", "readme"]
 description = "Print SVG card designs on J1x0-series card printers over raw USB"
-readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
@@ -14,7 +13,7 @@ authors = [
 ]
 keywords = ["card printer", "id card", "dye-sublimation", "svg", "usb", "libusb", "j110i"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
@@ -51,6 +50,21 @@ Issues        = "https://github.com/TeaEngineering/j1x0-cardprinter/issues"
 [tool.hatch.version]
 source = "vcs"
 
+# PyPI shows the README out of context, so make its relative links and image absolute.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '!\[([^\]]*)\]\((?!https?://)([^)]+)\)'
+replacement = '![\1](https://raw.githubusercontent.com/TeaEngineering/j1x0-cardprinter/main/\2)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '(?<!!)\[([^\]]*)\]\((?!https?://|#|mailto:)([^)]+)\)'
+replacement = '[\1](https://github.com/TeaEngineering/j1x0-cardprinter/blob/main/\2)'
+
 [tool.hatch.build.targets.wheel]
 packages = ["j1x0_cardprinter"]
 
@@ -59,6 +73,7 @@ include = [
     "/j1x0_cardprinter",
     "/docs",
     "/examples",
+    "/scripts",
     "/tests",
     "/README.md",
     "/LICENSE",
