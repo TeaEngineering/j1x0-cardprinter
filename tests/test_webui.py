@@ -219,9 +219,9 @@ def test_a_printer_that_is_not_ready_blocks_the_job(designs):
         app.wait_for_job()
         assert app.job()["state"] == "error" and "not ready" in app.job()["message"]
         assert link.sent == []
-        app.start_print(render["id"], force=True)
+        app.start_print(render["id"])                    # asking again changes nothing: there is no override
         app.wait_for_job()
-        assert app.job()["state"] == "done" and link.sent
+        assert app.job()["state"] == "error" and link.sent == []
     finally:
         app.close()
 
@@ -276,6 +276,69 @@ def test_a_usb_failure_while_sending_is_reported(designs):
         assert app.status()["state"] != "printing"                 # the lock is released
     finally:
         app.close()
+
+
+# ── Uploading a template ─────────────────────────────────────────────────────
+
+TEMPLATE_SVG = (b'<svg xmlns="http://www.w3.org/2000/svg" width="85.6mm" height="54mm" viewBox="0 0 85.6 54">'
+                b'<text x="5" y="10">$name$</text></svg>')
+
+
+def test_an_uploaded_template_is_stored_in_the_designs_folder_and_listed(app, designs):
+    result = app.save_design("My Card.svg", TEMPLATE_SVG)
+    assert result == {"name": "My Card", "title": "My card", "replaced": False}
+    assert (designs / "My Card.svg").read_bytes() == TEMPLATE_SVG
+    assert {"name": "My Card", "title": "My card"} in app.designs()["designs"]
+    assert app.design_info("My Card")["fields"] == [{"name": "name", "label": "Name", "kind": "text"}]
+    assert app.render("My Card", {"name": "Ada"})["id"]                       # and it can be used straight away
+
+
+def test_uploading_the_same_name_again_replaces_it(app, designs):
+    app.save_design("card.svg", TEMPLATE_SVG)
+    newer = TEMPLATE_SVG.replace(b"$name$", b"$title$")
+    assert app.save_design("card.svg", newer)["replaced"] is True
+    assert (designs / "card.svg").read_bytes() == newer
+    assert sorted(p.name for p in designs.iterdir()) == ["card.svg", "staff_badge.svg"]      # no temporary files left
+
+
+@pytest.mark.parametrize("sent, stored", [
+    ("../../etc/evil.svg", "evil"),                      # only the file name counts, never a path
+    ("C:\\Users\\me\\Card.SVG", "Card"),
+    ("weird:name*?.svg", "weird_name"),
+    (".hidden.svg", "hidden"),                           # a dot file would not be listed
+    ("noextension", "noextension"),
+    ("", "design"),
+    ("Zoë café.svg", "Zoë café"),
+    ("x" * 200 + ".svg", "x" * 80),
+])
+def test_uploaded_names_are_made_safe(app, designs, sent, stored):
+    assert app.save_design(sent, TEMPLATE_SVG)["name"] == stored
+    assert (designs / f"{stored}.svg").exists()
+    assert all(p.parent == designs for p in designs.rglob("*.svg"))              # nothing outside the folder
+
+
+@pytest.mark.parametrize("data, why", [
+    (b"", "empty"),
+    (b"this is not xml", "not a valid SVG"),
+    (b"<svg><unclosed>", "not a valid SVG"),
+    (b'<html xmlns="http://www.w3.org/1999/xhtml"><body/></html>', "not an SVG"),
+    (b"\xff\xfe binary \x00", "not a valid SVG"),
+])
+def test_a_file_that_is_not_an_svg_is_refused_and_nothing_is_stored(app, designs, data, why):
+    with pytest.raises(AppError) as exc:
+        app.save_design("bad.svg", data)
+    assert exc.value.status == 400 and why in exc.value.message
+    assert [p.name for p in designs.iterdir()] == ["staff_badge.svg"]
+
+
+def test_the_designs_folder_is_created_on_the_first_upload(tmp_path):
+    folder = tmp_path / "does" / "not" / "exist"
+    card_app = CardApp(folder, rasteriser=FakeRasteriser(), link_factory=lambda: J1x0MockUSB())
+    try:
+        card_app.save_design("first.svg", TEMPLATE_SVG)
+        assert (folder / "first.svg").exists()
+    finally:
+        card_app.close()
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
@@ -398,3 +461,47 @@ def test_oversized_uploads_are_refused(server):
 def test_bad_json_is_a_400(server):
     status, _, _ = call(server, "POST", "/api/render", b"{not json", headers={"Content-Type": "application/json"})
     assert status == 400
+
+
+def test_a_template_can_be_uploaded_over_http(server, designs):
+    from urllib.parse import quote
+    status, _, body = call(server, "POST", "/api/designs", TEMPLATE_SVG,
+                           headers={"X-Filename": quote("Zoë café.svg"), "Content-Type": "image/svg+xml"})
+    assert status == 200
+    assert json.loads(body) == {"name": "Zoë café", "title": "Zoë café", "replaced": False}
+    assert (designs / "Zoë café.svg").exists()
+    status, _, body = call(server, "GET", "/api/designs")
+    assert "Zoë café" in [d["name"] for d in json.loads(body)["designs"]]
+
+
+def test_uploading_a_template_needs_the_token(server, designs):
+    status, _, _ = call(server, "POST", "/api/designs", TEMPLATE_SVG, token=False, headers={"X-Filename": "a.svg"})
+    assert status == 403 and [p.name for p in designs.iterdir()] == ["staff_badge.svg"]
+
+
+def test_a_bad_or_oversized_template_upload_is_refused_over_http(server, designs, monkeypatch):
+    status, _, body = call(server, "POST", "/api/designs", b"not svg", headers={"X-Filename": "a.svg"})
+    assert status == 400 and "not a valid SVG" in json.loads(body)["error"]
+    monkeypatch.setattr(webui, "MAX_DESIGN", 100)
+    status, _, _ = call(server, "POST", "/api/designs", TEMPLATE_SVG, headers={"X-Filename": "big.svg"})
+    assert status == 413
+    assert [p.name for p in designs.iterdir()] == ["staff_badge.svg"]
+
+
+def test_the_print_endpoint_ignores_any_attempt_to_override_a_not_ready_printer(designs):
+    link = J1x0MockUSB(status=0x00)
+    card_app = CardApp(designs, rasteriser=FakeRasteriser(), link_factory=lambda: link)
+    httpd = make_server(card_app, port=0)
+    thread = threading.Thread(target=lambda: httpd.serve_forever(poll_interval=0.02), daemon=True)
+    thread.start()
+    try:
+        _, _, body = call(httpd, "POST", "/api/render", {"design": "staff_badge", "values": VALUES})
+        render_id = json.loads(body)["id"]
+        status, _, _ = call(httpd, "POST", "/api/print", {"id": render_id, "force": True})
+        assert status == 200
+        card_app.wait_for_job()
+        assert card_app.job()["state"] == "error" and link.sent == []
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        card_app.close()

@@ -26,8 +26,17 @@ code { background: var(--accent-soft); padding: 0.1rem 0.4rem; border-radius: 4p
   display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; justify-content: space-between;
   padding: 0.9rem 1.2rem; background: var(--panel); border-bottom: 1px solid var(--line);
 }
-.status-wrap { display: flex; align-items: center; gap: 0.7rem; }
+.status-wrap { position: relative; display: flex; align-items: center; gap: 0.7rem; }
 .chip { padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.9rem; font-weight: 600; }
+button.chip { border: 0; cursor: pointer; font-family: inherit; }
+button.chip:hover { box-shadow: 0 0 0 2px var(--line); }
+.popover {
+  position: absolute; right: 0; top: calc(100% + 0.5rem); z-index: 10; width: min(34rem, 92vw);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.popover[hidden] { display: none; }
+.popover pre { margin: 0; }
 .chip-unknown, .chip-no_printer { background: var(--line); color: var(--muted); }
 .chip-ready { background: var(--ok-bg); color: var(--ok); }
 .chip-attention { background: var(--warn-bg); color: var(--warn); }
@@ -108,9 +117,10 @@ button.link { border: 0; background: none; color: var(--accent); text-decoration
 .note.bad { color: var(--bad); font-weight: 600; }
 .warn { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 0.5rem 0.8rem; margin: 0 0 0.8rem; }
 
-.advanced { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: 0.8rem; }
-.advanced summary { cursor: pointer; color: var(--muted); }
-.check { display: flex; gap: 0.5rem; align-items: center; margin: 0.6rem 0; }
+.upload { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-top: 0.9rem; }
+.upload-note { color: var(--muted); font-size: 0.95rem; }
+.upload-note.ok { color: var(--ok); font-weight: 600; }
+.upload-note.bad { color: var(--bad); font-weight: 600; }
 pre {
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem;
   font-size: 0.85rem; overflow-x: auto; white-space: pre-wrap;

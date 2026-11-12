@@ -10,8 +10,12 @@
   <header class="top">
     <h1>Card printer</h1>
     <div class="status-wrap">
-      <span id="status" class="chip chip-unknown" role="status" aria-live="polite">Checking the printer…</span>
+      <button id="status" class="chip chip-unknown" type="button" aria-live="polite" aria-expanded="false"
+              aria-controls="details-pop" title="Click for printer details">Checking the printer…</button>
       <button id="status-refresh" class="link" type="button">Check again</button>
+      <div id="details-pop" class="popover" role="dialog" aria-label="Printer details" hidden>
+        <pre id="details-out"></pre>
+      </div>
     </div>
   </header>
 
@@ -22,9 +26,14 @@
         <div id="designs" class="designs"></div>
         <div id="no-designs" class="notice" hidden>
           <p><strong>No card designs found.</strong></p>
-          <p>Save your card designs (Inkscape <code>.svg</code> files) in this folder:</p>
+          <p>Upload a card design (an Inkscape <code>.svg</code> file) with the button below, or save it in this folder:</p>
           <p><code id="designs-dir"></code></p>
           <button id="reload" type="button">Look again</button>
+        </div>
+        <div class="upload">
+          <input id="template-file" type="file" accept=".svg,image/svg+xml" hidden>
+          <button id="upload-template" type="button">Upload template…</button>
+          <span id="upload-note" class="upload-note" role="status" aria-live="polite"></span>
         </div>
       </section>
 
@@ -44,13 +53,6 @@
         <p id="warnings" class="warn" hidden></p>
         <button id="print" class="primary" type="button" disabled>Print card</button>
         <p id="print-note" class="note" aria-live="polite"></p>
-
-        <details class="advanced">
-          <summary>Advanced</summary>
-          <label class="check"><input type="checkbox" id="force"> Print even if the printer reports a problem</label>
-          <button id="details" class="link" type="button">Show printer details</button>
-          <pre id="details-out" hidden></pre>
-        </details>
       </section>
     </div>
   </main>

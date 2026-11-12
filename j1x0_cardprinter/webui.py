@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -31,6 +32,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, unquote, urlparse
+from xml.etree import ElementTree
 
 from PIL import Image, ImageOps
 
@@ -45,7 +47,8 @@ from .usb import DeviceSelectionError, J1x0USB
 log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8730
-MAX_UPLOAD = 12 * 1024 * 1024
+MAX_UPLOAD = 12 * 1024 * 1024         # a photo
+MAX_DESIGN = 25 * 1024 * 1024         # a card design: an SVG, often with its photos embedded
 MAX_JSON = 1024 * 1024
 LinkFactory = Callable[[], AbstractContextManager]
 
@@ -57,6 +60,16 @@ class AppError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+def design_name(filename: str) -> str:
+    """The design name (file name without `.svg`) for an uploaded file: only the last path part, no
+    characters that are awkward in a file name, no leading dot (it would not be listed), at most 80 long."""
+    name = re.split(r"[\\/]", filename or "")[-1]
+    name = re.sub(r"\.svg$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"[^\w\-. ()]+", "_", name)
+    name = re.sub(r"\s+", " ", name).strip(" ._")[:80].strip(" ._")
+    return name or "design"
 
 
 @dataclass
@@ -149,6 +162,30 @@ class CardApp:
         png = _png(image)
         self._thumbs[name] = (mtime, png)
         return png
+
+    def save_design(self, filename: str, data: bytes) -> dict:
+        """Store an uploaded SVG in the designs folder (replacing one of the same name) and say what it is called.
+        Anything that is not a well-formed SVG is refused before it touches the folder."""
+        if not data.strip():
+            raise AppError(400, "That file is empty.")
+        try:
+            root = ElementTree.fromstring(data)
+        except Exception as exc:                       # malformed XML, bad encoding, ...
+            raise AppError(400, "That file is not a valid SVG (it could not be read as XML).") from exc
+        if root.tag.rsplit("}", 1)[-1] != "svg":
+            raise AppError(400, "That file is not an SVG: it is some other kind of XML.")
+        name = design_name(filename)
+        target = self.designs_dir / f"{name}.svg"
+        self.designs_dir.mkdir(parents=True, exist_ok=True)
+        replaced = target.exists()
+        partial = self.designs_dir / f".upload-{secrets.token_hex(6)}.tmp"      # a dot name: never listed
+        try:
+            partial.write_bytes(data)
+            os.replace(partial, target)                # atomic: a design is never half written
+        finally:
+            partial.unlink(missing_ok=True)
+        log.info("design %s %s", name, "replaced" if replaced else "added")
+        return {"name": name, "title": humanise(name), "replaced": replaced}
 
     # ── Uploads ──────────────────────────────────────────────────────────────
 
@@ -244,7 +281,7 @@ class CardApp:
         except Exception as exc:                         # usb.core.USBError and friends
             return {"state": "error", "ready": False, "message": f"Could not talk to the printer: {exc}"}
 
-    def start_print(self, render_id: str, force: bool = False) -> dict:
+    def start_print(self, render_id: str) -> dict:
         """Send the job behind a preview, in the background. One job at a time."""
         with self._lock:
             rendered = self._renders.get(render_id)
@@ -257,16 +294,15 @@ class CardApp:
                          "message": "Checking the printer…"}
             job = self._job
             snapshot = dict(job)                        # what the caller sees: the job has just begun
-        self._job_thread = threading.Thread(target=self._run_print, args=(job, rendered, force),
-                                            daemon=True)
+        self._job_thread = threading.Thread(target=self._run_print, args=(job, rendered), daemon=True)
         self._job_thread.start()
         return snapshot
 
-    def _run_print(self, job: dict, rendered: Rendered, force: bool) -> None:
+    def _run_print(self, job: dict, rendered: Rendered) -> None:
         try:
             with self._link_factory() as link:
                 report = check_link(link, details=False)
-                if not report.ready and not force:
+                if not report.ready:
                     self._finish(job, "error", _attention(report.problems))
                     return
 
@@ -408,6 +444,9 @@ def make_server(app: CardApp, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
                 if path == "/api/job":
                     return self._json(200, app.job() or {"state": "idle"})
             else:
+                if path == "/api/designs":                     # a template: the raw SVG, named in X-Filename
+                    filename = unquote(self.headers.get("X-Filename") or "")
+                    return self._json(200, app.save_design(filename, self._body(MAX_DESIGN)))
                 if path == "/api/upload":
                     return self._json(200, {"id": app.save_upload(self._body(MAX_UPLOAD))})
                 if path == "/api/render":
@@ -415,8 +454,7 @@ def make_server(app: CardApp, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
                     return self._json(200, app.render(str(data.get("design", "")), data.get("values") or {}))
                 if path == "/api/print":
                     data = self._json_body()
-                    return self._json(200, app.start_print(str(data.get("id", "")),
-                                                           bool(data.get("force"))))
+                    return self._json(200, app.start_print(str(data.get("id", ""))))
             raise AppError(404, "Not found.")
 
     server = ThreadingHTTPServer((host, port), Handler)

@@ -210,7 +210,7 @@ function printState() {
   if (state.job && state.job.state === "sending") return { ok: false, note: state.job.message };
   if (state.rendering || state.stale || state.uploads) return { ok: false, note: "Drawing the card…" };
   if (!state.renderId) return { ok: false, note: "The card could not be drawn." };
-  if (!state.status.ready && !$("force").checked) {
+  if (!state.status.ready) {
     return { ok: false, note: state.status.message || "Waiting for the printer…" };
   }
   return { ok: true, note: "" };
@@ -238,7 +238,7 @@ async function print() {
   clearJobNote();
   $("print").disabled = true;
   try {
-    state.job = await postJSON("/api/print", { id: state.renderId, force: $("force").checked });
+    state.job = await postJSON("/api/print", { id: state.renderId });
   } catch (error) {
     state.job = { state: "error", message: error.message };
   }
@@ -271,19 +271,57 @@ async function refreshStatus() {
   updateUI();
 }
 
-async function showDetails() {
-  const button = $("details");
+// The details live in a popover under the status badge: click the badge to open or close it.
+async function openDetails() {
+  const pop = $("details-pop");
   const out = $("details-out");
-  button.disabled = true;
-  out.hidden = false;
+  pop.hidden = false;
+  $("status").setAttribute("aria-expanded", "true");
   out.textContent = "Asking the printer…";
   try {
     const data = await getJSON("/api/status?full=1");
+    if (pop.hidden) return;                      // closed while we were asking
     out.textContent = (data.lines && data.lines.length ? data.lines.join("\n") : data.message);
   } catch (error) {
     out.textContent = error.message;
+  }
+}
+
+function closeDetails() {
+  $("details-pop").hidden = true;
+  $("status").setAttribute("aria-expanded", "false");
+}
+
+function toggleDetails() {
+  if ($("details-pop").hidden) openDetails(); else closeDetails();
+}
+
+// ── Uploading a template ────────────────────────────────────────────────────
+
+function uploadNote(message, kind) {
+  const note = $("upload-note");
+  note.textContent = message;
+  note.className = kind ? `upload-note ${kind}` : "upload-note";
+}
+
+async function uploadTemplate(file) {
+  if (!file) return;
+  uploadNote(`Uploading ${file.name}…`);
+  $("upload-template").disabled = true;
+  try {
+    const result = await (await api("/api/designs", {
+      method: "POST",
+      headers: { "Content-Type": "image/svg+xml", "X-Filename": encodeURIComponent(file.name) },
+      body: file,
+    })).json();
+    await loadDesigns();
+    await selectDesign(result.name);
+    uploadNote(`${result.replaced ? "Updated" : "Added"} “${result.title}”.`, "ok");
+  } catch (error) {
+    uploadNote(error.message, "bad");
   } finally {
-    button.disabled = false;
+    $("upload-template").disabled = false;
+    $("template-file").value = "";               // so the same file can be chosen again
   }
 }
 
@@ -292,8 +330,13 @@ async function showDetails() {
 $("print").addEventListener("click", print);
 $("reload").addEventListener("click", loadDesigns);
 $("status-refresh").addEventListener("click", refreshStatus);
-$("details").addEventListener("click", showDetails);
-$("force").addEventListener("change", updateUI);
+$("status").addEventListener("click", toggleDetails);
+document.addEventListener("click", (event) => {
+  if (!$("details-pop").hidden && !event.target.closest(".status-wrap")) closeDetails();
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDetails(); });
+$("upload-template").addEventListener("click", () => $("template-file").click());
+$("template-file").addEventListener("change", () => uploadTemplate($("template-file").files[0]));
 
 loadDesigns().catch((error) => showOverlay(error.message, true));
 refreshStatus();
