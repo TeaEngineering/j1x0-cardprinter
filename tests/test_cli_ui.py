@@ -13,7 +13,11 @@ class FakeRasteriser:
 
 @pytest.fixture
 def served(monkeypatch):
-    """Capture what `j1x0 ui` would serve instead of starting a server."""
+    """Capture what `j1x0 ui` would serve instead of starting a server.
+
+    Pretends Inkscape is installed, so "auto" does not depend on what the machine running the tests has."""
+    from j1x0_cardprinter import raster
+    monkeypatch.setattr(raster, "find_inkscape", lambda: "/fake/inkscape")
     seen = {}
 
     def fake_serve(app, **options):
