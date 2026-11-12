@@ -41,7 +41,7 @@ from PIL import Image
 from .library import default_dir
 from .printer import Printer
 from .probe import check_link
-from .raster import RENDERERS, make_rasteriser, render_card
+from .raster import RENDERERS, composite, make_rasteriser, render_card
 from .sender import PrinterError, send_job
 from .protocol import cmd
 from .status import show_bytes
@@ -292,9 +292,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("fields", parents=[common], help="list $token$ fields and layers in a template")
     p.add_argument("template", type=Path)
 
-    p = sub.add_parser("preview", parents=[common], help="write the colour and K renders as PNGs")
+    p = sub.add_parser("preview", parents=[common],
+                       help="write the colour and K renders, and the two together, as PNGs")
     card_args(p)
     p.add_argument("-o", "--out", type=Path, default=Path("."))
+    p.add_argument("--composite", action=argparse.BooleanOptionalAction, default=True,
+                   help="also write composite.png, the colour render with the resin layer over it, "
+                        "which is the preview the web UI shows (default; --no-composite to skip)")
 
     p = sub.add_parser("render", parents=[common], aliases=["build"], help="write the printer job to a file (no printer needed)")
     render_args(p)
@@ -335,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
         card.colour.save(args.out / "colour.png")
         if card.k_mask is not None:
             Image.fromarray(np.where(card.k_mask, 0, 255).astype(np.uint8)).save(args.out / "k.png")
+        if args.composite:
+            composite(card).save(args.out / "composite.png")
         return 0
 
     job = _render_job(args)

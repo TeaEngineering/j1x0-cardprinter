@@ -39,6 +39,31 @@ def test_render_writes_a_job_file(fakes, tmp_path, capsys):
     assert fakes.sent == []                      # render never touches the printer
 
 
+def test_preview_writes_colour_k_and_composite_by_default(fakes, tmp_path):
+    assert cli.main(["preview", TEST_CARD, "-o", str(tmp_path)]) == 0
+    assert sorted(p.name for p in tmp_path.glob("*.png")) == ["colour.png", "composite.png", "k.png"]
+    colour, k, both = (np.asarray(Image.open(tmp_path / n).convert("RGB")) for n in
+                       ("colour.png", "k.png", "composite.png"))
+    assert colour.shape == k.shape == both.shape == (640, 1024, 3)
+    black = (k == 0).all(axis=2)                       # the resin dots
+    assert black.any() and (both[black] == 0).all()    # the composite has them in black
+    assert (both[~black] == colour[~black]).all()      # and is the colour render everywhere else
+
+
+def test_preview_can_skip_the_composite(fakes, tmp_path):
+    assert cli.main(["preview", TEST_CARD, "--no-composite", "-o", str(tmp_path)]) == 0
+    assert sorted(p.name for p in tmp_path.glob("*.png")) == ["colour.png", "k.png"]
+
+
+def test_preview_of_a_design_without_resin_has_no_k_file(fakes, tmp_path):
+    svg = tmp_path / "plain.svg"
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="85.6mm" height="54mm" '
+                   'viewBox="0 0 85.6 54"><rect width="85.6" height="54" fill="#fff"/></svg>')
+    out = tmp_path / "out"
+    assert cli.main(["preview", str(svg), "-o", str(out)]) == 0
+    assert sorted(p.name for p in out.glob("*.png")) == ["colour.png", "composite.png"]
+
+
 def test_build_is_an_alias_for_render(fakes, tmp_path):
     out = tmp_path / "job.bin"
     assert cli.main(["build", TEST_CARD, "-o", str(out)]) == 0

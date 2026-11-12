@@ -94,7 +94,7 @@ Command line
 |---|---|---|
 | `ui` | Inkscape | The web UI above. Plain `j1x0` does this. |
 | `fields` | | List the `$token$` fields and layer names in a template. |
-| `preview` | Inkscape | Write `colour.png` and `k.png` so you can check the two renders. |
+| `preview` | Inkscape | Write `colour.png`, `k.png` and `composite.png` (the two together, as the web UI previews it) so you can check the renders. `--no-composite` skips the last. |
 | `render` | Inkscape | Render a card to a printer job file. No printer needed. (`build` is an alias.) |
 | `send` | printer | Check the printer. With a job file, then send it; without one, stop there. No Inkscape needed. |
 | `print` | both | `render` then `send`, through a temporary job file. `-o job.bin` keeps the file. |
@@ -172,7 +172,7 @@ First test print
 
 Start with [`examples/test-card.svg`](examples/test-card.svg). It has no fields:
 
-    $ j1x0 preview examples/test-card.svg -o out/        # check out/colour.png and out/k.png
+    $ j1x0 preview examples/test-card.svg -o out/        # check out/composite.png (and colour.png, k.png)
     $ j1x0 render  examples/test-card.svg -o test.bin
     $ j1x0 send                                          # first, just check the link
     $ j1x0 send    test.bin
