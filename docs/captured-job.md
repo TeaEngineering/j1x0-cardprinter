@@ -106,7 +106,7 @@ The only class requests the Windows stack sent were `GET_DEVICE_ID` (`A1 00`, wV
 
 ## What this capture cannot show
 
-* The resin bitmap's real packing: its K plane was all zeros, so the line order and the `0x5B` stuffing
-  come from the disassembly and a printed card, not from the wire.
+* The resin bitmap: its K plane was all zeros. The line order was settled by a printed card (above), and
+  the `0x5B` stuffing is still only from the disassembly (`open-questions.md` Q17).
 * Tuning values other than the default 5.
 * Anything but a single-sided YMCKO job on one ribbon.

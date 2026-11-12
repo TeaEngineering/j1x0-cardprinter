@@ -88,7 +88,4 @@ panel have not been measured.
 
 ## Cross-checks still worth doing
 
-1. Capture the Windows driver printing a card with *resin content* (black text), to compare its K
-   packing with ours byte for byte. The only capture so far has an all-zero K bitmap, so the K line
-   order comes from a printed card, not from the wire.
-2. Capture the Windows driver with a changed tuning value, to see which command carries it (Q8).
+* Capture the Windows driver with a changed tuning value, to see which command carries it (Q8).

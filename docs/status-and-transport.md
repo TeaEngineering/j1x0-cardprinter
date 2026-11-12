@@ -56,7 +56,7 @@ section 4 says.
 **Consequences for the code.** The printer is identified by its strings and its vid/pid
 (`KNOWN_PRINTERS` in `usb.py`), not by a 1284 id. The status byte is not used for readiness on this
 model (`NO_STATUS_REQUEST`, cautious because of the first-contact timeouts); a version query answers
-instead (`probe.quick_check`). A missing status byte is a warning, not a failure. Everything is reached
+instead (`probe.quick_check`). A missing status byte is not a failure: the link check shows `port status: unavailable` and carries on. Everything is reached
 in about 0.1 s. Once Q15 is settled the code can ask for the status byte, as Windows does.
 
 ## 1. USB identity

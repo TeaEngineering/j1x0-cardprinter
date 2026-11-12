@@ -104,9 +104,9 @@ versions are `FUN_180014db0` and `FUN_180014ac0`.) Header
 
 ## 4. K resin bitmap
 
-Used for the black resin panel when the K surface has any non-white byte. **[code]** Header, framing and
-bit meaning are confirmed by prints made by this tool (text, markers and line blocks come out right);
-the byte stuffing and the line order need the qualifications below.
+Used for the black resin panel when the K surface has any non-white byte. **[code]** Header, framing, bit
+meaning and line order are confirmed by prints made by this tool (text, markers and line blocks come
+out right); only the byte stuffing is not (below).
 
 ```
 ESC F CR ESC G 0 0 10 640 1024 1 CR ESC Z      header (a fixed string, with 10 filled in)

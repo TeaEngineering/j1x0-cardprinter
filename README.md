@@ -125,11 +125,6 @@ if a USB call hangs) or redirect with `2>&1`:
         ...
         1980 ms    303900  end of card: <CR><ESC>MO<CR><ESC>!FF 0<CR>
 
-Every image block in the file is checked against the size its header implies, and a mismatch
-is marked `<-- PROBLEM`. With `-vv` each chunk and each acknowledgement (`ESC E 2 -> <ACK>`) is
-logged too, with timing, and each USB write and read is shown. `--raw` sends the file exactly as
-it is, with no pacing and no end-of-card commands, for experiments.
-
 ### Checking the printer
 
 `send` always opens the USB link and checks it before it sends anything, using the same reads
@@ -146,7 +141,6 @@ the Windows driver makes when it starts a document:
     ribbon type:      2 (YMCKO)
     remaining count:  132
     panels printed:   12992
-    warning:          the printer does not answer the USB status request; readiness is judged from its replies instead
     result:           READY
 
 From `model/firmware` down, the fields are the ones on the Windows driver's "Device Information"
@@ -159,8 +153,7 @@ it works as a health check in scripts. With a job file it refuses to send to a p
 not ready (offline, error, no ribbon, no reply); `--force` overrides that and `--no-check`
 skips the checks. Nothing is printed and no job is started by the check.
 
-That output is from a real J110i (serial number masked). This model does not answer the USB
-status request, so readiness is judged from its replies, which is why the warning appears.
+That output is from a real J110i (serial number masked).
 
 ### Finding the printer
 
@@ -183,6 +176,8 @@ Start with [`examples/test-card.svg`](examples/test-card.svg). It has no fields:
     $ j1x0 render  examples/test-card.svg -o test.bin
     $ j1x0 send                                          # first, just check the link
     $ j1x0 send    test.bin
+
+![The test card as the web UI previews it: colour bars and edge bands, resin text and markers](docs/images/test-card.png)
 
 It is designed to answer the open questions about a new printer:
 
@@ -212,7 +207,10 @@ Writing a template
 * If you write SVG by hand, add `xml:space="preserve"` to text elements that contain spaces
   between tspans. Inkscape adds it automatically when it saves.
 
-See [`examples/card.svg`](examples/card.svg).
+See [`examples/card.svg`](examples/card.svg), rendered here with `firstName=Ada`, `lastName=Lovelace`
+and `cardNo=0042`:
+
+![examples/card.svg filled in as in the web UI preview](docs/images/card.png)
 
 Python API
 ----------
@@ -255,15 +253,6 @@ Development
     $ python -m pytest
 
 The tests need no printer and no Inkscape. CI runs them on Python 3.10 to 3.13.
-
-### Releasing
-
-The version comes from the git tag (via `hatch-vcs`). Publishing a GitHub release runs
-`.github/workflows/publish.yml`, which builds the sdist and wheel, checks the metadata, runs
-the tests, and uploads to PyPI with
-[trusted publishing](https://docs.pypi.org/trusted-publishers/). One-time setup on PyPI: add a
-trusted publisher for owner `TeaEngineering`, repository `j1x0-cardprinter`, workflow
-`publish.yml`, environment `pypi`.
 
 Licence
 -------
