@@ -100,6 +100,17 @@ def parse_panels(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+
+def show_bytes(data: bytes, limit: int = 40) -> str:
+    """Printable rendering of protocol bytes for logs: `<ESC>V<CR>`, `<ACK>`, `\\x1f`, ..."""
+    names = {0x1B: "<ESC>", 0x0D: "<CR>", 0x06: "<ACK>", 0x15: "<NAK>", 0x0A: "<LF>"}
+    out = []
+    for byte in data[:limit]:
+        out.append(names.get(byte) or (chr(byte) if 0x20 <= byte < 0x7F else f"\\x{byte:02x}"))
+    more = f"...(+{len(data) - limit} B)" if len(data) > limit else ""
+    return "".join(out) + more
+
+
 @dataclass(frozen=True)
 class Reply:
     """A parsed reply to a query command.

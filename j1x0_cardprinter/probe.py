@@ -5,8 +5,10 @@ the printer-class status byte, then `V` (model/firmware), `!RIBBON` and `!RIBLEN
 other fields of the Windows "Device Information" dialog (serial, head resistance, magnetic
 encoder, panels printed, smart-card type). Nothing is printed and no job is started (no `MASTER`).
 
-Readiness depends on the status byte and the first three queries; the Device Information fields
-are informational and show as N/A when the printer does not answer.
+Readiness depends on the first three queries, and on the status byte when the printer provides
+one. A J110i does not answer the USB status request at all, so a missing status byte is only a
+warning: the printer's own replies decide. The Device Information fields are informational and
+show as N/A when the printer does not answer.
 """
 
 from __future__ import annotations
@@ -122,6 +124,23 @@ def _ask(link: J1x0Link, command: bytes, timeout: int) -> Reply:
         return Reply(ok=False, message=str(exc))
 
 
+def quick_check(link: J1x0Link, timeout: int = 1500) -> tuple[bool, str]:
+    """A cheap readiness test for polling: `(ready, reason)`.
+
+    Uses the USB status byte when the printer provides one, otherwise a single version query.
+    """
+    try:
+        status = link.port_status()
+    except Exception:                               # not supported, or no answer
+        reply = _ask(link, CMD_VERSION, timeout)
+        if reply.ok:
+            return True, ""
+        return False, f"it is not answering ({reply.message}); it may be busy printing"
+    if status.ok_to_open:
+        return True, ""
+    return False, "it reports an error or is offline"
+
+
 def check_link(link: J1x0Link, timeout: int = 2000, details: bool = True) -> LinkReport:
     """Read status and identity from an open link. Never raises for a printer that is merely
     unresponsive; those become `problems`.
@@ -135,7 +154,8 @@ def check_link(link: J1x0Link, timeout: int = 2000, details: bool = True) -> Lin
         report.status = link.port_status()
     except Exception as exc:                        # usb.core.USBError and friends
         report.status_error = str(exc)
-        report.problems.append("no response to the USB status request")
+        report.warnings.append("the printer does not answer the USB status request; "
+                               "readiness is judged from its replies instead")
     else:
         if not report.status.ok_to_open:
             report.problems.append("printer reports an error or is offline")

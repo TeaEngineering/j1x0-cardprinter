@@ -1,6 +1,6 @@
 import pytest
 
-from j1x0_cardprinter.probe import check_link
+from j1x0_cardprinter.probe import check_link, quick_check
 from j1x0_cardprinter.status import parse_panels, smart_card_type
 from j1x0_cardprinter.usb import J1x0MockUSB
 
@@ -124,11 +124,34 @@ def test_low_ribbon_warns():
     assert report.ready and any("running low" in w for w in report.warnings)
 
 
-def test_status_request_failure_is_a_problem_not_an_exception():
-    class Broken(J1x0MockUSB):
-        def port_status(self):
-            raise OSError("pipe error")
+class NoStatusByte(J1x0MockUSB):
+    """Like a J110i: it never answers the USB status request."""
 
-    report = check_link(Broken())
-    assert not report.ready
-    assert "unavailable (pipe error)" in "\n".join(report.lines())
+    def port_status(self):
+        raise OSError("Operation timed out")
+
+
+def test_a_printer_without_a_status_byte_is_judged_by_its_replies():
+    report = check_link(NoStatusByte())
+    assert report.ready
+    assert any("does not answer the USB status request" in w for w in report.warnings)
+    assert "port status:      unavailable (Operation timed out)" in "\n".join(report.lines())
+
+
+def test_no_status_byte_and_no_replies_is_not_ready():
+    report = check_link(NoStatusByte(responses={b"\x1bV\r": b""}))
+    assert not report.ready and "version query" in report.problems[0]
+
+
+def test_quick_check_uses_the_status_byte_when_there_is_one():
+    assert quick_check(J1x0MockUSB()) == (True, "")
+    ready, reason = quick_check(J1x0MockUSB(status=0x00))
+    assert not ready and "error or is offline" in reason
+
+
+def test_quick_check_falls_back_to_a_version_query():
+    link = NoStatusByte()
+    assert quick_check(link) == (True, "")
+    assert link.queries == [b"\x1bV\r"]
+    ready, reason = quick_check(NoStatusByte(responses={b"\x1bV\r": b""}))
+    assert not ready and "not answering" in reason and "busy printing" in reason
