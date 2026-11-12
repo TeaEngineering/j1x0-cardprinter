@@ -24,3 +24,12 @@ __pycache__/
 # Local tool state
 .claude/
 .DS_Store
+
+# USB captures of the vendor driver (SnoopyPro logs and what was extracted from them)
+captures/
+
+# Disc images (e.g. an OS installer used for the capture VM)
+*.iso
+
+# Local run logs
+sending.log

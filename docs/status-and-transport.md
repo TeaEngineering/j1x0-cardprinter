@@ -2,27 +2,65 @@
 
 Sources: `jvlLMON.DLL` (the Windows language monitor), the `GetPrinterData` calls in
 `jvlRaster.DLL`, `jv.inf`. Function names below are the ones annotated in the Ghidra project.
-Markers as in `protocol.md`: **[code]** read from code or data, **[infer]**, **[guess]**.
+Markers as in `protocol.md`: **[code]** read from code or data, **[infer]**, **[guess]**, and now
+**[hw]** observed on a real printer.
 
 This file is the source for `j1x0_cardprinter/status.py`, `usb.py` and `probe.py`.
+
+## 0. Observed on a real J110i
+
+First contact with hardware (a J110i, firmware V1.18.25, on macOS with libusb). **[hw]**
+
+**The device.** `0a5f:005c`, USB 1.1 full speed, self-powered, bcdDevice 1.4, one configuration with
+one interface: class 7 (printer), subclass 1, protocol 2 (bidirectional), with bulk-IN `0x81` and
+bulk-OUT `0x02`, both 64 bytes. The vendor id `0a5f` is Zebra's; the printer's own strings say
+`JAVELIN` (manufacturer) and `J110i` (product).
+
+**What answers and what does not.**
+
+| Request | Result |
+|---|---|
+| Standard requests (device descriptor, GET_STATUS, configuration) | answered |
+| String descriptor, asked with an explicit language id `0x0409` | answered, **except index 3** (the USB serial number), which times out |
+| String descriptor 0 (the language list) | **times out**, so pyusb's `get_string` fails; ask for `0x0409` directly |
+| Printer-class `GET_DEVICE_ID` (every form tried: lengths 2 to 1024, `wIndex` `0`, `0x0100`, interface claimed or not) | **times out**: this model has no 1284 id |
+| Printer-class `GET_PORT_STATUS` | **times out**: no status byte |
+| Bulk-OUT writes, bulk-IN reads | work |
+
+**The query channel is confirmed.** Writing `ESC V CR` and then `ESC E 2 CR` (two separate bulk
+writes) returned `J110i V1.18.25` followed by `0x06`. Writing `ESC V CR` alone returned nothing in
+3 seconds. So the `ESC E 2 CR` suffix is required, and replies are text ending in ACK, exactly as
+section 4 says.
+
+**Replies to the Device Information queries** (this unit):
+
+| Query | Reply |
+|---|---|
+| `ESC V CR` | `J110i V1.18.25` (no smart-card code, so no encoder fitted) |
+| `ESC %SERIE CR` | `J11000xxxx` |
+| `ESC !V 15 CR` (head resistance) | `2890` |
+| `ESC !V 20 CR` (magnetic encoder) | `0` |
+| `ESC !RIBBON CR` | `2` (YMCKO) |
+| `ESC !RIBLEN CR` | `132` |
+| `ESC !NL CR` (panels printed) | `00012992 00000028`: the panels-printed count, then a second number (28) that is not identified |
+
+**Consequences for the code.** The printer is identified by its strings and its vid/pid
+(`KNOWN_PRINTERS` in `usb.py`), not by a 1284 id. The status byte is not used for readiness on this
+model (`NO_STATUS_REQUEST`); a version query answers instead (`probe.quick_check`). A missing status
+byte is a warning, not a failure. Everything is reached in about 0.1 s.
 
 ## 1. USB identity
 
 `jv.inf` matches hardware id `USBPRINT\JAVEL_CARD_PRINTERJ1702A` for the J110i ("Javelin J110i
-Card Printer USB"); the J110m is `...J1B16B`, the J120i `...J1706E`. **[code]** Windows builds
-that id from the printer's IEEE-1284 device id, so the id string contains the same text. The
-VID/PID are not in the INF.
+Card Printer USB"); the J110m is `...J1B16B`, the J120i `...J1706E`. **[code]** Windows evidently
+builds that id from the device's strings, since the printer has no 1284 id (section 0).
 
-The device is a standard USB printer-class device (class 7). **[infer]** That gives us two ways in
-without knowing the VID/PID:
-
-- enumerate every printer-class interface and read the **GET_DEVICE_ID** string
-  (`bmRequestType 0xA1, bRequest 0, wIndex = interface<<8 | alt`), then pick the one that
-  mentions `JAVEL` or a `J1x0` model. This is what `list_printers`/`choose` do.
-- or pass `--vid`/`--pid` explicitly (`system_profiler SPUSBDataType`, `lsusb`).
-
-The match pattern (`javel|j1[012]0`) is a guess from the INF; the real id string has not been
-seen. **[guess]**
+The device is a standard USB printer-class device (class 7). **[hw]** `j1x0` finds it without a
+VID/PID by listing every printer-class interface and picking the one that is a known model or whose
+strings or 1284 id mention `JAVEL` or a `J1x0` model (`list_printers`/`choose`). Pass
+`--vid`/`--pid` to override (`system_profiler SPUSBDataType`, `lsusb`). Other models in the family
+may behave differently: they are matched by their strings, and a model that does answer
+`GET_DEVICE_ID` or `GET_PORT_STATUS` will be asked for them.
 
 ## 2. What Windows does when a document starts
 
@@ -175,7 +213,47 @@ resources. **[code]**
 The UI also issues `ESC !V 1`, `ESC !V 2`, `ESC !V 24` and `ESC !V 25`; those are not part of
 this dialog and are not yet identified.
 
-## 8. Implementation in this repository
+## 8. Sending a job: acknowledgements and the end of the card
+
+What the Windows port monitor does between the spooler and the printer. **[code]** Written up after a
+J110i, sent a whole job in one go, stopped on the display "DOWNLOADING DATA", printed nothing and then
+ignored every query until it was switched off. **[hw]**
+
+**WritePort** (`WritePortChunked`, `jvlLMON.DLL` `0x180009140`). For a USB port it writes **at most 4096
+bytes per call** (`0x1000`) and reports how many it wrote; the spooler calls again for the rest.
+
+**What the capture showed** (`captured-job.md`, a real print from Windows). The monitor does not ask after every
+chunk. It asks `ESC E 2 CR` and gets a single `0x06` (ACK):
+
+* after each colour plane's data (before its `ESC IS p`) and after the `ESC IS p`,
+* after the resin bitmap, `ESC I 10`, and `ESC IV 30` (not after `ESC vF`),
+* after the final `ESC MO CR`,
+
+and never during the job header or inside an image block. (`WaitForPrinterAck`, `jvlLMON.DLL`
+`0x180006f20`, sleeps 50 ms, then reads the USB status if it can, and otherwise writes `ESC E 2 CR` and
+reads the answer, up to 5 tries; a NAK is decoded to an error number.) A J110i does not answer the
+status request, which is why the enquiries are needed at all.
+
+**The end of the card.** The capture ends with `ESC MO CR` alone (move the card out), with no `CR` before it and no
+`ESC !FF 0 CR` after it, on a YMCKO ribbon. The Ghidra reading of `EndDocPort` (`0x180006700`: sleep 2 s, then
+`SendEndOfCardCommands`) had `CR`, `ESC MO CR`, `ESC !FF 0 CR` for panel ribbons; the capture is what the real
+monitor did, so `protocol.end_of_card` follows it.
+
+> **History.** The first hardware attempts left the printer on "DOWNLOADING DATA" and failed to get an
+> acknowledgement after a plane. That was not a pacing problem: the planes were in the wrong format
+> (run-length coded instead of packed, `image-data.md`), so the printer was still waiting for the rest of
+> each one. Several pacing variants were tried and removed; there is only the monitor's behaviour now.
+
+If a run goes wrong, `--log FILE` keeps a flushed, full-detail trail (stdout alone does not hold
+the protocol log: it goes to stderr), and if a USB call blocks for 2 minutes a stack dump is written to it. (The printer prints each panel while it receives
+the job and stops reading USB for tens of seconds between panels; `J1x0USB.write` waits for it, up to 5 minutes
+without a byte moving, and `sender` waits up to 3 minutes for each ACK.)
+
+**Implementation.** `sender.send_job` does the above; `j1x0 send -v` logs each command as it goes (with the
+image blocks checked against the sizes their headers imply, `jobparse.py`), `-vv` also logs each
+acknowledgement and every USB transfer. `--raw` writes the file as it is, for experiments.
+
+## 9. Implementation in this repository
 
 | Piece | Where |
 |---|---|

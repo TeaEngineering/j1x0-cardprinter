@@ -6,10 +6,12 @@ Design a card in Inkscape, put `$tokens$` in it, and print it on a J1x0-series
 
 ![Python versions](https://img.shields.io/pypi/pyversions/j1x0-cardprinter.svg) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/TeaEngineering/j1x0-cardprinter/ci.yml) [![PyPI version](https://badge.fury.io/py/j1x0-cardprinter.svg)](https://badge.fury.io/py/j1x0-cardprinter)
 
-> **Status: pre-alpha, not yet tested on a printer.** The print protocol was reverse
-> engineered from the vendor's Windows driver by static analysis alone. The job builder
-> follows it faithfully, but no card has been printed yet. Expect the first prints to need
-> adjustment (see [Orientation](#orientation) and [docs/open-questions.md](docs/open-questions.md)).
+> **Status: pre-alpha. The printer link works; this tool has not yet printed a card.** The print
+> protocol was reverse engineered from the vendor's Windows driver and checked against a USB capture
+> of that driver printing on a J110i ([docs/captured-job.md](docs/captured-job.md)): the job this
+> tool builds is byte-for-byte what Windows sent. Finding the printer and reading its status and
+> details has been verified on a J110i, and the first real print from this tool is still to come
+> (see [docs/open-questions.md](docs/open-questions.md)).
 
 How it works
 ------------
@@ -61,8 +63,7 @@ browser. It is meant for someone who just needs to print cards:
    **Print card** button is only enabled when it is. The card sent to the printer is exactly the
    one in the preview.
 
-The **Advanced** section has the two image-mirroring switches (for the first test card, see
-[Orientation](#orientation)), a way to print even when the printer reports a problem, and a button
+The **Advanced** section has a way to print even when the printer reports a problem, and a button
 that shows the full printer details. With no printer connected you can still choose, fill in and
 preview cards.
 
@@ -104,24 +105,47 @@ add `--seed N` if you want repeated renders to be byte-identical.
 Every field in the template needs a `-s NAME=VALUE`; the command stops and lists any that are
 missing.
 
+### Seeing what is sent (`-v`)
+
+`send` and `print` send the job the way the Windows driver and port monitor do: in chunks of up to
+4096 bytes with a short pause after each, asking the printer (`ESC E 2`) for an ACK where the
+monitor does (after each plane's data and the commands that follow), then `ESC MO` to move the
+card out. If the printer
+stops answering or reports an error, the command stops and says how many bytes had gone. `-v` logs
+the protocol; `-vv` logs every transfer. Either flag works before or after the sub-command. The log
+goes to stderr, so to keep it use `--log FILE` (full detail, flushed line by line, with a stack dump
+if a USB call hangs) or redirect with `2>&1`:
+
+    $ j1x0 send test.bin -v
+        1146 ms  sending 303900 bytes in chunks of up to 4096, then the end-of-card commands
+        1146 ms         0  ESC MASTER
+        1146 ms         8  ESC JOB 0
+        1146 ms        97  plane 0 (32 levels, 1024x640): 442368 of 442368 B packed
+        ...
+        1980 ms    303900  end of card: <CR><ESC>MO<CR><ESC>!FF 0<CR>
+
+Every image block in the file is checked against the size its header implies, and a mismatch
+is marked `<-- PROBLEM`. With `-vv` each chunk and each acknowledgement (`ESC E 2 -> <ACK>`) is
+logged too, with timing, and each USB write and read is shown. `--raw` sends the file exactly as
+it is, with no pacing and no end-of-card commands, for experiments.
+
 ### Checking the printer
 
 `send` always opens the USB link and checks it before it sends anything, using the same reads
 the Windows driver makes when it starts a document:
 
     $ j1x0 send
-    device:           bus 1 addr 7  04f9:0123  ...
-    1284 id:          MFG:...;MDL:...;
-    usb serial:       ...
-    port status:      0x18 (selected, no error)
-    model/firmware:   ...
-    serial number:    ...
-    head resistance:  ...
-    magnetic encoder: Yes
-    smart card:       HID iCLASS
+    device:           bus 1 addr 4  0a5f:005c  JAVELIN J110i
+    port status:      unavailable (this printer does not answer GET_PORT_STATUS)
+    model/firmware:   J110i V1.18.25
+    serial number:    J11000xxxx
+    head resistance:  2890
+    magnetic encoder: No
+    smart card:       No
     ribbon type:      2 (YMCKO)
-    remaining count:  87
-    panels printed:   1234
+    remaining count:  132
+    panels printed:   12992
+    warning:          the printer does not answer the USB status request; readiness is judged from its replies instead
     result:           READY
 
 From `model/firmware` down, the fields are the ones on the Windows driver's "Device Information"
@@ -134,18 +158,20 @@ it works as a health check in scripts. With a job file it refuses to send to a p
 not ready (offline, error, no ribbon, no reply); `--force` overrides that and `--no-check`
 skips the checks. Nothing is printed and no job is started by the check.
 
-The output above is illustrative: none of this has run against a printer yet.
+That output is from a real J110i (serial number masked). This model does not answer the USB
+status request, so readiness is judged from its replies, which is why the warning appears.
 
 ### Finding the printer
 
 By default the printer is found automatically: every USB printer-class device is listed and the
-one whose IEEE-1284 id looks like a J1x0 is used. If that finds nothing, or several, `send`
-prints what it saw and you can pick one with the IDs from `system_profiler SPUSBDataType`
-(macOS) or `lsusb` (Linux):
+one that is a known model (`0a5f:005c` is the J110i) or whose USB strings or IEEE-1284 id mention
+Javelin or a J1x0 model is used. If that finds nothing, or several, `send` prints what it saw and
+you can pick one with the IDs from `system_profiler SPUSBDataType` (macOS) or `lsusb` (Linux):
 
-    $ j1x0 send --vid 0x1234 --pid 0x5678
+    $ j1x0 send --vid 0x0a5f --pid 0x005c
 
-If you find the IDs, please open an issue or pull request so they can become defaults.
+If your J100i, J110m or J120i is not found, please open an issue with its vid:pid and what
+`send --vid ... --pid ...` prints so it can be added to the known models.
 
 First test print
 ----------------
@@ -163,7 +189,7 @@ It is designed to answer the open questions about a new printer:
   ticks starting at the card edge. A white gap means that plane is missing or shifted; the
   last visible tick shows how much of the image is clipped.
 * **Corner markers** that are all different (filled square, hollow square, X, circle), so a
-  rotated or mirrored card is obvious. See [Orientation](#orientation).
+  rotated or mirrored card is obvious.
 * **Gradients** for cyan, magenta, yellow and composite black, each driving its own plane,
   with a 16-step strip beneath. Banding or a plane that prints too light shows up here.
 * **Registration**: black resin lines and a crosshair run across the colour bars, so any
@@ -209,17 +235,6 @@ with J1x0USB.discover() as link:               # or discover(vid=..., pid=...)
 
 `J1x0MockUSB` records writes (`.sent`) and queries (`.queries`) instead of using USB, and lets
 you set the status byte and replies, which is handy for tests.
-
-Orientation
------------
-
-How the image is mirrored or rotated in the data stream has not been confirmed against a
-printer. If your first test card comes out rotated or mirrored, try the flags on `render` and
-`print` (`Orientation` in the Python API):
-
-    $ j1x0 print card.svg ... --flip-lines --flip-dots     # a 180 degree turn
-
-An asymmetric test card, such as a large letter F in one corner, makes this quick to settle.
 
 Documentation
 -------------

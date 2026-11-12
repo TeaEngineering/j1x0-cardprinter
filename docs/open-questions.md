@@ -4,23 +4,20 @@ In rough priority order for the first hardware session. "Test" is the cheapest e
 
 ## Image data
 
-**Q1. How does the printer frame the colour-plane payload?**
-`CR` (0x0D) is a valid density (`v = 13`), and the driver never escapes it. The K bitmap does
-escape `0x5B`, so the design is not uniform. *Test:* send a plane whose first value is 13 and see
-if the card prints normally.
+**Q1. How does the printer frame the colour-plane payload?** *Answered by a USB capture.* The
+payload is a fixed 442368 bytes (432 per line, 1024 lines), read by length once the `ESC GS` header
+has been seen, so a `CR` or `ESC` byte inside it is data (`captured-job.md`).
 
 **Q2. What do the numeric header fields mean?**
 `ESC G S p 32 ...` (32 = level count?) and `ESC G 0 0 10 640 1024 1` (10 = ?). Both are literals
 in the code. *Test:* change them and compare prints.
 
-**Q3. Orientation and mirroring of the stream.**
-The driver walks the surface forwards or backwards (a 180 degree turn) depending on the rotation
-flag, and has landscape variants that were not decompiled. We need to know which way up a card
-comes out for a given stream order. *Test:* print an asymmetric test pattern (an "F" in one corner).
+**Q3. Orientation and mirroring of the stream.** *Answered.* Decoding the captured planes gives an upright
+card for stream line *i* = image column *i* and dot *j* = image row *j* (`encode.stream_order`), and the card
+printed upright in portrait. There are no flip options.
 
-**Q4. Is blank paper really value `1`?**
-By arithmetic, white maps to `0xF0` then to `1`, so `0` is never sent. A sparse plane might also
-accept `0`. *Test:* a white card with `0` vs `1`.
+**Q4. Is blank paper really value `1`?** *Answered:* yes, a blank line is `04 21` x 213 words (the
+capture).
 
 **Q5. Overlay bitmap (`vG`) encoding.**
 `FUN_180009fc0` is not decompiled. Not needed for full-frame or rectangle overlays.
@@ -31,9 +28,10 @@ data. *Test:* a smooth gradient with all 32 values.
 
 ## Job control
 
-**Q7. How does a job end?** The firmware-file format on the help page ends with `SLAVE`, and
-`MASTER` starts it. The driver emits `MASTER` but never `SLAVE`. The end-of-card sequence
-(`MF`, `MO`, `IV`, `IS`) differs across branches of `SendPageData` and `SendMagEncodeSequence`.
+**Q7. How does a job end?** *Answered by a USB capture.* The monitor writes `ESC MO CR` after the
+last data, and asks `ESC E 2 CR` after each plane's data, after the commands that follow image data
+and after the final `ESC MO` (`captured-job.md`). Not yet confirmed on this tool's own output: the
+duplex and magstripe branches (`SendMagEncodeSequence`) end differently.
 
 **Q8. Meaning of the single-letter commands and tuning values.**
 `F`, `I n`, `IV n`, `IH n`, `IS n`, `M?`, `!FF`, `SXY`, `JOB n`, and `+$C`/`+$L`/`+C`/`+CH`/`+CV`.
@@ -45,28 +43,23 @@ internal enum. Needed to pick the right job template for non-YMCKO ribbons.
 
 ## Transport and encoding
 
-**Q10. Does the link check work?** Run `j1x0 send` with the printer connected and idle. It is
-the cheapest first experiment, and each part of it is a separate question:
+**Q10. Does the link check work?** *Answered on a J110i (V1.18.25), see
+`status-and-transport.md` section 0.* Yes: the printer is found by its strings and vid/pid
+(`0a5f:005c`), and every query answers in the framing the Windows monitor uses, including the
+`ESC E 2 CR` suffix, which is required. It has no 1284 id and no status byte (both requests time
+out). Still open:
 
-- *The 1284 id.* Does `GET_DEVICE_ID` answer, and does it match `javel|j1[012]0`? If not,
-  autodetect finds nothing and `--vid`/`--pid` are needed (the output lists what was seen). The
-  id string and VID/PID should then be recorded in `status-and-transport.md`.
-- *GET_PORT_STATUS.* Is `0x18` what an idle printer returns? (The monitor's rule is bit 5 set, or
-  `status & 0x38 == 0x18`.)
-- *Bulk-IN replies.* Does a query come back at all? If `V` times out, try without the `ESC E 2 CR`
-  suffix (`QUERY_SUFFIX` in `usb.py`) and with `ESC E 1 CR`.
-- *Reply shape.* Does `V` return text ending in `0x06`, as the monitor expects? Capture the raw
-  bytes and compare with `parse_reply`.
-- *`wIndex`.* The class requests use `interface<<8 | alt` for GET_DEVICE_ID and the interface
-  number for GET_PORT_STATUS; the other form is tried as a fallback for GET_DEVICE_ID only.
+- Whether other models in the family (J100i, J110m, J120i) behave the same.
+- What the status byte would say on a printer that does answer it (`0x18` idle, per the monitor).
+- How the printer behaves for queries *while* a card is printing (the UI avoids asking then).
 
-**Q11. What do `ESC E 2`, `ESC A n`, `ISREADY` and `CHECK_STATUS` mean on the wire?**
-`ESC E n` follows every query on the Windows side. `ISREADY` and `CHECK_STATUS` are handled by
-the monitor (section 5 of `status-and-transport.md`); only the port-status part is understood.
+**Q11. What do `ESC A n`, `ISREADY` and `CHECK_STATUS` mean on the wire?** (`ESC E 2` is
+settled: it must follow a query for the printer to answer.) `ISREADY` and `CHECK_STATUS` are
+handled by the monitor (section 5 of `status-and-transport.md`); only the port-status part is
+understood, and this printer does not provide one.
 
-**Q12. Is `ESC MASTER CR` needed once or twice?** The monitor writes it when it opens the port
-and the raster driver's job header begins with it as well. `render` emits one copy (the driver's);
-`send` adds none.
+**Q12. Is `ESC MASTER CR` needed once or twice?** *Answered:* the capture shows it twice in a row
+(the monitor's and the driver's), so the job header now has both.
 
 **Q13. Does `SOFT_RESET` matter?** rollingmill sends it for the MDX. `j1x0 send` does not unless
 `--soft-reset` is given, because it can abort a job in progress. The Windows monitor was not seen

@@ -1,8 +1,8 @@
 # Image data encoding
 
 Everything here comes from `SendPlanesYMC`, `SendPlane3Luma`, `SendMonoBitmapK`,
-`PrepareColourSurface`, the `RlePlane_*`/`RleLuma_*` encoders and `PackMonoBitmap_*` in
-`jvlRaster.DLL`. Markers as in `protocol.md`.
+`PrepareColourSurface`, the plane packers and `PackMonoBitmap_*` in `jvlRaster.DLL`, checked against
+a USB capture of the real driver (`captured-job.md`). Markers as in `protocol.md`.
 
 ## 1. Source surfaces
 
@@ -60,56 +60,19 @@ Because of step 3 the DIB byte is one of `0, 16, ... 240`, so after `(255 - byte
 the stream carries only the odd values `31, 29, ... 3, 1`. **Blank paper is `1`, never `0`.**
 **[code]** (derived by hand from the arithmetic; not observed on the wire)
 
-### Run-length encoding
+### Plane payload (packed, not run-length coded)
 
-One RLE stream per plane. The state (current value, count, state flag) is reset before the plane
-and is **not** reset between lines, so runs can cross line boundaries. **[code]**
+**Corrected by the capture** (`captured-job.md`): an earlier version of this file, and of the tool,
+described a run-length code taken from `RlePlane_Portrait`. That function is never used for a normal
+job (`SendPlanesYMC` sets `pdev+300 = 1` and takes `FUN_180014540`).
 
-| Case | Output |
-|---|---|
-| single value `v` | one byte, `v` (always `< 0x80`) |
-| run of `n` equal values, `2 <= n <= 127` | two bytes: `0x80 + n`, then `v` |
+Per head line, 640 samples packed three to a 16-bit big-endian word, `0 | s0 | s1 | s2` (5 bits
+each). 213 words carry samples 0 to 638, a 214th carries sample 639 in its top field, then four
+zero bytes: 432 bytes a line, 442368 bytes a plane, followed by one `CR`. Blank is `04 21` words.
+`encode.pack_plane` / `unpack_plane` implement it and round-trip the captured planes exactly.
 
-A run of 127 is flushed immediately as `0xFF, v`, then encoding restarts. At the end of the
-plane any pending value or run is flushed the same way.
-
-Reference encoder (derived from `RlePlane_Portrait`; untested):
-
-```python
-def rle_plane(samples):
-    out = bytearray()
-    state, val, cnt = 0, 0, 0
-    for v in samples:
-        if state == 0:
-            val, cnt, state = v, 0, 1
-        elif state == 1:
-            if v == val:
-                cnt, state = 2, 2
-            else:
-                out.append(val)
-                val = v
-        else:
-            if v != val:
-                out += bytes((0x80 + cnt, val))
-                val, state = v, 1
-            else:
-                cnt += 1
-                if cnt == 127:
-                    out += bytes((0xFF, val))
-                    state = 0
-    if state == 1:
-        out.append(val)
-    elif state == 2:
-        out += bytes((0x80 + cnt, val))
-    return bytes(out)
-```
-
-The payload is followed by one `CR` (0x0D). The buffer the driver uses is `0xA1000` bytes; the
-worst case (no runs at all) is 1024 x 640 = 655 360 bytes, so it is sized for this encoding. **[code]**
-
-**Warning:** `v = 13` (a valid density, from DIB byte 144) has the same value as `CR`. The driver
-does no escaping, so the printer must frame the payload by pixel count rather than by scanning
-for `CR`. **[guess]** See `open-questions.md` Q1.
+Because the length is fixed, the payload needs no escaping: a `CR` or `ESC` byte inside it is data
+(this settles Q1).
 
 ### Sample order
 
@@ -121,7 +84,7 @@ last row and walks backwards (a 180 degree turn). The landscape encoders (`FUN_1
 
 ## 3. Grey K plane (plane 3)
 
-Same pre-processing and RLE as the colour planes, but each sample is the inverted luma:
+Same pre-processing as the colour planes, but each sample is the inverted luma (its payload format has not been captured):
 
 ```
 v = ( (255-G)*59 + (255-R)*30 + (255-B)*11 ) // 100  >> 3

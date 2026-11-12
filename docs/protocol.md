@@ -1,8 +1,10 @@
 # Javelin J110i print protocol (reverse engineered)
 
 Source: static analysis of the NBS Technologies "Javelin Value Class Printers" Windows driver,
-v8.00.02.01 (`blobs/`, annotated in the Ghidra project `javelin`). Nothing here has been verified
-against a real printer yet. Every claim carries a confidence marker:
+v8.00.02.01 (`blobs/`, annotated in the Ghidra project `javelin`), corrected against a USB capture
+of that driver printing to a real J110i (`captured-job.md`, which supersedes this file where they
+differ: no run-length coding, two `MASTER`, tuning sent, end of card is `ESC MO CR`). Every claim
+carries a confidence marker:
 
 | Marker | Meaning |
 |---|---|
@@ -14,6 +16,7 @@ against a real printer yet. Every claim carries a confidence marker:
 
 | File | Contents |
 |---|---|
+| `captured-job.md` | The job the real driver and port monitor sent, byte for byte. Start here. |
 | `commands.md` | Every ESC command found, with arguments and where the driver emits it. |
 | `image-data.md` | Exact encoding of the colour planes, the K bitmap and the overlay bitmap. Includes a reference encoder. |
 | `driver-internals.md` | How the Windows driver is structured, the function map for Ghidra, and the private device-state offsets. |
@@ -55,8 +58,8 @@ are listed in `jvRIBBON.INI` (YMCKO, YMCK, K-only, UV variants, and others).
 
 | Panel | How it is sent | Format |
 |---|---|---|
-| Y, M, C | planes 0, 1, 2 via `ESC G S p ...` | 5-bit density, run-length encoded |
-| K (dye-style grey) | plane 3 via `ESC G S 3 ...` | luma density, same RLE |
+| Y, M, C | planes 0, 1, 2 via `ESC GS p ...` | 5-bit density, three samples per 16-bit word |
+| K (dye-style grey) | plane 3 via `ESC GS 3 ...` | luma density (not captured) |
 | K (resin) | `ESC G 0 0 10 640 1024 1` | 1 bit per dot, byte-stuffed |
 | O (overlay) | `ESC v...` commands | full frame, rectangles, or a 1-bit bitmap |
 
@@ -68,7 +71,8 @@ Derived from `SendJobHeader` and `SendPageData` (case 0 of the ribbon switch, no
 for the commands and their order, **[guess]** for their meaning.
 
 ```
-ESC MASTER CR                       job start (host-to-printer "master" mode)
+ESC MASTER CR                       job start (host-to-printer "master" mode); sent twice, see below
+ESC MASTER CR
 ESC JOB 0 CR                        0 = non-duplex (duplex flows use 2 or 1)
 ESC SXY 1 CR
 ESC +$C 0 v CR  ESC +$C 1 v CR  ESC +$C 2 v CR      per-panel head tuning (Y,M,C)
@@ -77,9 +81,9 @@ ESC +C v CR                         common tuning
 ESC +CV v CR                        tuning for some ribbons
 [ESC +DLAMI a b CR]                 laminator, only on laminator-equipped models
 
-ESC $ F CR ESC G S 0 32 0 0 1024 640 SP  <Y  payload> CR  ESC I S 0 CR
-ESC $ F CR ESC G S 1 32 0 0 1024 640 SP  <M  payload> CR  ESC I S 1 CR
-ESC $ F CR ESC G S 2 32 0 0 1024 640 SP  <C  payload> CR  ESC I S 2 CR
+ESC $F CR ESC GS 0 32 0 0 1024 640 SP  <Y  payload> CR  ESC IS 0 CR      (ESC $F CR only here)
+          ESC GS 1 32 0 0 1024 640 SP  <M  payload> CR  ESC IS 1 CR
+          ESC GS 2 32 0 0 1024 640 SP  <C  payload> CR  ESC IS 2 CR
 
 if the K resin surface has any content:
     ESC F CR ESC G 0 0 10 640 1024 1 CR ESC Z  <80-byte lines x 1024> CR
@@ -91,14 +95,16 @@ overlay (see commands.md for the modes):
     ESC vF CR [ESC vL ... CR | ESC vG ... ] ESC IV 30 CR     (full)   or   ESC IV 31 CR
 ```
 
-What is missing or uncertain:
+The capture (`captured-job.md`) confirmed this order, and showed these details:
 
-- The exact end-of-card sequence (feed and eject, `MF`/`MO`) differs per branch and is partly in
-  `SendMagEncodeSequence`, which is not fully analysed.
-- Whether and how a job is terminated. The firmware-file format on the help page ends with
-  `SLAVE`, but the driver code never emits that string.
-- The meaning of most single-letter commands (`F`, `I`, `IV`, `IS`, `M?`). Names above are
-  from position and the help text only.
+- **Two `ESC MASTER CR`** in a row (the port monitor's and the driver's), and the tuning commands
+  with the value 5.
+- **The end of the card is `ESC MO CR`**, written by the monitor after the last data, nothing else.
+- The monitor asks the printer `ESC E 2 CR` and waits for an ACK after each plane's data, after
+  `ESC IS`, `ESC I 10`, `ESC IV 30` and `ESC MO`, but not during the header or inside a block
+  (`status-and-transport.md` section 8).
+- The meaning of most single-letter commands (`F`, `I`, `IV`, `IS`, `M?`) is still only from
+  position and the help text.
 
 ## 5. Magnetic stripe
 
