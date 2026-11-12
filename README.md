@@ -6,12 +6,12 @@ Design a card in Inkscape, put `$tokens$` in it, and print it on a J1x0-series
 
 ![Python versions](https://img.shields.io/pypi/pyversions/j1x0-cardprinter.svg) ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/TeaEngineering/j1x0-cardprinter/ci.yml) [![PyPI version](https://badge.fury.io/py/j1x0-cardprinter.svg)](https://badge.fury.io/py/j1x0-cardprinter)
 
-> **Status: pre-alpha. The printer link works; this tool has not yet printed a card.** The print
-> protocol was reverse engineered from the vendor's Windows driver and checked against a USB capture
-> of that driver printing on a J110i ([docs/captured-job.md](docs/captured-job.md)): the job this
-> tool builds is byte-for-byte what Windows sent. Finding the printer and reading its status and
-> details has been verified on a J110i, and the first real print from this tool is still to come
-> (see [docs/open-questions.md](docs/open-questions.md)).
+> **Status: alpha. It prints cards on a J110i (firmware V1.18.25, YMCKO ribbon), from the command line and
+> from the web UI.** The print protocol was reverse engineered from the vendor's Windows driver and
+> checked against a USB capture of that driver printing ([docs/captured-job.md](docs/captured-job.md)):
+> the job this tool builds is byte-for-byte what Windows sent. A printed test card matches its Inkscape
+> preview. Not yet tried: other models in the family, other ribbons, duplex, the magnetic stripe and
+> smart-card encoders (see [docs/open-questions.md](docs/open-questions.md)).
 
 How it works
 ------------
