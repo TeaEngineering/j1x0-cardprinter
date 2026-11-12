@@ -108,6 +108,11 @@ def encode_plane(plane: np.ndarray) -> bytes:
 
 
 def pack_mono(mask: np.ndarray) -> bytes:
-    """True = resin dot -> 1024 lines x 80 bytes, MSB first, with 0x5B doubled."""
-    lines = stream_order(mask.astype(np.uint8))
+    """True = resin dot -> 1024 lines x 80 bytes, MSB first, with 0x5B doubled.
+
+    The lines go out in the reverse order to the colour planes: a printed test card showed the resin panel
+    mirrored along the card's long edge when it was in the same order, so the head-line order of the K
+    bitmap is the opposite of the dye planes' (the dots within a line are not reversed).
+    """
+    lines = stream_order(mask.astype(np.uint8))[::-1]
     return np.packbits(lines, axis=1).tobytes().replace(b"\x5b", b"\x5b\x5b")

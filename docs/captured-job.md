@@ -62,9 +62,16 @@ matter: the printer reads a fixed length once the `ESC GS` header has been seen.
 ## Orientation
 
 Decoding the three captured planes back into an image gives an upright card when stream line *i* is
-image column *i* and dot *j* is image row *j* (`encode.stream_order`). The printed card came out upright in
-portrait, so there is nothing to flip and the tool has no mirroring options. Plane 0 is the blue
+image column *i* and dot *j* is image row *j* (`encode.stream_order`). The printed colour planes came out the
+right way round, so there is nothing to flip there and the tool has no mirroring options. Plane 0 is the blue
 channel of the surface, plane 1 green, plane 2 red (so Y, M, C densities), as assumed.
+
+**The resin (K) bitmap is the exception.** The capture's resin bitmap was all zeros, so it could not show
+this, but a printed test card did: with the K lines in the same order as the colour planes the resin panel
+came out mirrored along the card's long edge (corner markers, text and the 0%/100% labels all reversed),
+while the dots across the short edge were right. `encode.pack_mono` therefore sends the K lines in the
+reverse order. (The Windows driver packs the K bitmap with its own walking logic, `FUN_180015cc0`, which
+was not decompiled; this is the measured result.)
 
 ## Not what the disassembly said
 

@@ -51,16 +51,27 @@ def test_quantise_levels_are_multiples_of_16():
 
 def test_pack_mono_shape_and_bit_order():
     mask = np.zeros((DOTS, LINES), bool)
-    mask[0, 0] = True                       # dot 0 of line 0 -> MSB of byte 0
+    mask[0, LINES - 1] = True               # image column 1023 is the first line sent; dot 0 is its MSB
     data = pack_mono(mask)
     assert len(data) == LINES * 80
     assert data[0] == 0x80 and not any(data[1:])
 
 
+def test_the_resin_lines_go_out_in_the_reverse_order_to_the_colour_planes():
+    # A printed card showed K mirrored along the long edge when it used the dye planes' line order.
+    image = np.zeros((DOTS, LINES), np.uint8)
+    image[5, 0] = 1                          # image column 0, row 5
+    colour_first_line = stream_order(image)[0]
+    assert colour_first_line[5] == 1         # the dye planes send column 0 first...
+    k = np.frombuffer(pack_mono(image.astype(bool)), np.uint8).reshape(LINES, 80)
+    assert not k[0].any() and k[LINES - 1].any()          # ...the resin bitmap sends it last
+    assert k[LINES - 1][0] == 0x80 >> 5      # dot 5 -> bit 5 from the MSB, dots are not reversed
+
+
 def test_pack_mono_stuffs_0x5b():
     mask = np.zeros((DOTS, LINES), bool)
     for dot in (1, 3, 4, 6, 7):             # 0b01011011 = 0x5B
-        mask[dot, 0] = True
+        mask[dot, LINES - 1] = True         # the first resin line is image column 1023
     data = pack_mono(mask)
     assert data[:2] == b"\x5b\x5b" and len(data) == LINES * 80 + 1
 
@@ -73,3 +84,4 @@ def test_stream_order_line_i_is_image_column_i():
     assert lines[0, 0] == img[0, 0] and lines[0, 1] == img[1, 0] and lines[1, 0] == img[0, 1]
     with pytest.raises(ValueError):
         stream_order(np.zeros((3, 3)))
+

@@ -55,8 +55,8 @@ def test_a_bad_line_terminator_is_flagged():
 
 def test_stuffed_0x5b_bytes_are_counted_once():
     mask = np.zeros((DOTS, LINES), bool)
-    for dot in (1, 3, 4, 6, 7):                          # the byte 0x5B in the first line
-        mask[dot, 0] = True
+    for dot in (1, 3, 4, 6, 7):                          # the byte 0x5B in the first line sent
+        mask[dot, LINES - 1] = True
     payload = pack_mono(mask)
     assert payload[:2] == b"\x5b\x5b" and len(payload) == 81921
     bitmap = next(s for s in parse_job(mono_block(payload)) if "resin" in s.text)
