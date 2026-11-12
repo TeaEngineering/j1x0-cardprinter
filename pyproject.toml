@@ -73,7 +73,6 @@ include = [
     "/j1x0_cardprinter",
     "/docs",
     "/examples",
-    "/scripts",
     "/tests",
     "/README.md",
     "/LICENSE",

@@ -1,7 +1,7 @@
 """Check our encoder and job builder against a USB capture of the Windows driver printing a card.
 
-The capture (captures/USBLog5.usblog, a SnoopyPro log) is not in the repository; these tests are
-skipped without it. See docs/captured-job.md.
+The capture (captures/USBLog5.usblog, a SnoopyPro log) is not in the repository, and scripts/ is not in
+the sdist; these tests are skipped without either. See docs/captured-job.md.
 """
 
 import re
@@ -16,7 +16,8 @@ pytestmark = pytest.mark.skipif(not CAPTURE.exists(), reason="no USB capture of 
 
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from snoopypro_out import writes                                    # noqa: E402
+snoopypro_out = pytest.importorskip("snoopypro_out", reason="scripts/ is not in the sdist")
+writes = snoopypro_out.writes
 
 from j1x0_cardprinter.encode import LINE_BYTES, LINES, pack_plane, unpack_plane   # noqa: E402
 from j1x0_cardprinter.jobparse import parse_job                      # noqa: E402

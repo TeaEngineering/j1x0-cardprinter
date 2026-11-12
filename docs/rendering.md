@@ -5,7 +5,7 @@ as a one-shot call, but it silently ignores or mangles features that Inkscape de
 cannot be the default. Inkscape's speed problem is solved by keeping one `inkscape --shell`
 process running, which renders in about 35 ms with pixel-identical output.
 
-Measured with `bench/render_bench.py` (Inkscape 1.4.2, cairosvg 2.9.1 on cairo 1.17.6, macOS).
+Measured with `scripts/render_bench.py` (Inkscape 1.4.2, cairosvg 2.9.1 on cairo 1.17.6, macOS).
 Every case is rendered at the printer grid, 1024 x 640, and compared with Inkscape as the
 reference, because Inkscape is where the designs are made and so defines what "right" looks like.
 
@@ -88,7 +88,7 @@ speckle; `tests/test_template_layers.py` covers it.
 ## Reproducing
 
     pip install cairosvg
-    python bench/render_bench.py OUTDIR --runs 5
+    python scripts/render_bench.py OUTDIR --runs 5
 
 It prints the tables above and writes `OUTDIR/sheet*.png` (Inkscape, cairosvg and the amplified
 difference side by side).

@@ -1,6 +1,6 @@
 """Benchmark cairosvg against Inkscape as card rasterisers.
 
-    python bench/render_bench.py OUTDIR [--runs N]
+    python scripts/render_bench.py OUTDIR [--runs N]
 
 For each test SVG it renders at the printer grid (1024 x 640) with both renderers, times them,
 compares pixels (Inkscape is the reference) and writes a contact sheet to OUTDIR. It also
